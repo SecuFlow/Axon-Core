@@ -1,5 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Syne } from "next/font/google";
+import { Toaster } from "sonner";
+import { BrandingBootstrap } from "./BrandingBootstrap";
+import { DemoModeBootstrap } from "./DemoModeBootstrap";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -35,7 +38,10 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} ${syne.variable} h-full scroll-smooth antialiased`}
     >
       <body className="min-h-full flex flex-col bg-[#030304] font-sans text-zinc-100">
+        <DemoModeBootstrap />
+        <BrandingBootstrap />
         {children}
+        <Toaster richColors position="top-center" theme="dark" />
       </body>
     </html>
   );

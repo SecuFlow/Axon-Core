@@ -1,14 +1,61 @@
-import {
-  ArrowRight,
-  BarChart3,
-  Coins,
-  Mic2,
-  Sparkles,
-} from "lucide-react";
+import Link from "next/link";
+import { BarChart3, Coins, Mic2, Sparkles } from "lucide-react";
+import { headers } from "next/headers";
+import { PublicHeader } from "@/components/PublicHeader";
 
-export default function Home() {
+type Campaign = {
+  enabled: boolean;
+  banner_image_url: string | null;
+};
+
+type PublicTeamMember = {
+  id: string;
+  name: string;
+  role: string;
+  email?: string | null;
+  phone?: string | null;
+  photo_url?: string | null;
+  sort_order: number;
+};
+
+async function loadCampaign(): Promise<Campaign> {
+  const h = await headers();
+  const host = h.get("x-forwarded-host") ?? h.get("host") ?? "";
+  const proto = h.get("x-forwarded-proto") ?? "https";
+  const base = host ? `${proto}://${host}` : "";
+  try {
+    const resp = await fetch(`${base}/api/public/campaign`, { cache: "no-store" });
+    const p = (await resp.json()) as Partial<Campaign>;
+    if (!resp.ok) return { enabled: false, banner_image_url: null };
+    return {
+      enabled: p.enabled === true,
+      banner_image_url: typeof p.banner_image_url === "string" ? p.banner_image_url : null,
+    };
+  } catch {
+    return { enabled: false, banner_image_url: null };
+  }
+}
+
+async function loadTeam(): Promise<PublicTeamMember[]> {
+  const h = await headers();
+  const host = h.get("x-forwarded-host") ?? h.get("host") ?? "";
+  const proto = h.get("x-forwarded-proto") ?? "https";
+  const base = host ? `${proto}://${host}` : "";
+  try {
+    const resp = await fetch(`${base}/api/public/team`, { cache: "no-store" });
+    const p = (await resp.json()) as { items?: PublicTeamMember[] };
+    if (!resp.ok) return [];
+    return Array.isArray(p.items) ? p.items : [];
+  } catch {
+    return [];
+  }
+}
+
+export default async function Home() {
+  const campaign = await loadCampaign();
+  const team = await loadTeam();
   return (
-    <div className="relative min-h-screen overflow-x-hidden bg-[#030304] text-zinc-100">
+    <div className="relative min-h-screen overflow-x-hidden bg-gradient-to-br from-black via-[#05111f] to-[#63b7ff] text-zinc-100">
       {/* Ambient layers */}
       <div
         className="pointer-events-none fixed inset-0 -z-10"
@@ -26,34 +73,18 @@ export default function Home() {
         />
       </div>
 
-      {/* Navigation */}
-      <header className="sticky top-0 z-50 border-b border-white/[0.06] bg-[#030304]/75 backdrop-blur-xl backdrop-saturate-150">
-        <nav className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6 sm:h-[4.25rem] sm:px-8">
-          <a
-            href="#"
-            className="font-[family-name:var(--font-syne)] text-lg font-semibold tracking-tight text-white sm:text-xl"
-          >
-            AXON{" "}
-            <span className="bg-gradient-to-r from-[#00D1FF] to-[#4DE8FF] bg-clip-text text-transparent">
-              CORE
-            </span>
-          </a>
-          <div className="flex items-center gap-8 text-sm font-medium">
-            <a
-              href="#loesungen"
-              className="text-zinc-400 transition-colors hover:text-white"
-            >
-              Lösungen
-            </a>
-            <a
-              href="#login"
-              className="rounded-full border border-white/[0.12] bg-white/[0.03] px-4 py-2 text-white shadow-[0_0_0_1px_rgba(0,209,255,0.08)] transition-all hover:border-[#00D1FF]/40 hover:bg-[#00D1FF]/[0.08] hover:text-[#00D1FF] hover:shadow-[0_0_24px_-4px_rgba(0,209,255,0.35)]"
-            >
-              Login
-            </a>
-          </div>
-        </nav>
-      </header>
+      {campaign.enabled && campaign.banner_image_url ? (
+        <div className="relative z-[60] w-full border-b border-[#D4AF37]/20 bg-[#030304]/90">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={campaign.banner_image_url}
+            alt=""
+            className="mx-auto block max-h-36 w-full object-cover object-center sm:max-h-44"
+          />
+        </div>
+      ) : null}
+
+      <PublicHeader variant="home" />
 
       <main>
         {/* Hero */}
@@ -74,84 +105,102 @@ export default function Home() {
               />
             </span>
           </h1>
-          <p className="mt-8 max-w-2xl text-lg leading-relaxed text-zinc-400 sm:text-xl sm:leading-relaxed">
+          <div className="mt-10 flex flex-wrap items-center gap-4">
+            <Link
+              href="/demo-anfordern"
+              className="inline-flex h-14 items-center justify-center rounded-full border border-[#D4AF37]/55 bg-[#D4AF37] px-10 text-base font-semibold text-[#030304] shadow-[0_0_44px_-8px_rgba(212,175,55,0.55)] transition-all hover:bg-[#e2c56c] hover:shadow-[0_0_62px_-6px_rgba(212,175,55,0.6)]"
+            >
+              Demo anfordern
+            </Link>
+            <Link
+              href="#loesungen"
+              className="inline-flex h-14 items-center justify-center rounded-full border border-white/[0.12] bg-white/[0.02] px-10 text-base font-semibold text-white transition hover:bg-white/[0.04]"
+            >
+              Lösungen ansehen
+            </Link>
+          </div>
+          <p className="mt-8 max-w-2xl text-left text-lg leading-relaxed text-zinc-400 sm:text-xl sm:leading-relaxed">
             Wir retten Fachwissen vor der Rente. KI-gestützte Dokumentation für
             globale Konzerne.
           </p>
-          <div className="mt-12 flex flex-col gap-4 sm:flex-row sm:items-center">
-            <a
-              href="#zugang"
-              className="group inline-flex h-14 items-center justify-center gap-2 rounded-full bg-gradient-to-r from-[#00D1FF] to-[#00b8e0] px-8 text-base font-semibold text-[#030304] shadow-[0_0_40px_-8px_rgba(0,209,255,0.55)] transition-transform hover:scale-[1.02] hover:shadow-[0_0_48px_-6px_rgba(0,209,255,0.65)] active:scale-[0.98]"
-            >
-              Systemzugang anfordern
-              <ArrowRight className="size-5 transition-transform group-hover:translate-x-0.5" />
-            </a>
-            <p className="text-sm text-zinc-500">
-              SOC2-ready · On-Premise · 24/7 Support
-            </p>
-          </div>
+          <p className="mt-8 w-full text-left text-sm text-zinc-500">
+            SOC2-ready · On-Premise · 24/7 Support
+          </p>
+
         </section>
 
-        {/* Das Weltsystem */}
+        {/* AxonCore Konzern */}
         <section
           id="loesungen"
           className="relative mx-auto max-w-6xl px-6 py-20 sm:px-8 sm:py-28"
         >
-          <div className="mb-14 max-w-2xl sm:mb-16">
-            <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[#00D1FF]">
-              Ökosystem
-            </p>
-            <h2 className="font-[family-name:var(--font-syne)] mt-3 text-3xl font-semibold tracking-tight text-white sm:text-4xl md:text-5xl">
-              Das Weltsystem
+          <div className="mb-14 sm:mb-16">
+            <h2 className="font-[family-name:var(--font-syne)] text-3xl font-semibold tracking-tight text-white sm:text-4xl md:text-5xl">
+              AxonCore Konzern
             </h2>
-            <p className="mt-4 text-base text-zinc-400 sm:text-lg">
-              Drei Säulen. Eine Architektur. Vollständige operative Klarheit.
-            </p>
           </div>
 
           <div className="grid gap-6 md:grid-cols-3 md:gap-8">
-            <article className="group relative flex flex-col rounded-2xl border border-white/[0.08] bg-gradient-to-b from-white/[0.06] to-transparent p-8 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)] transition-all duration-300 hover:border-[#00D1FF]/25 hover:shadow-[0_0_48px_-12px_rgba(0,209,255,0.2)]">
-              <div className="mb-6 flex size-12 items-center justify-center rounded-xl border border-[#00D1FF]/20 bg-[#00D1FF]/10 text-[#00D1FF] transition-colors group-hover:border-[#00D1FF]/40 group-hover:bg-[#00D1FF]/15">
-                <Mic2 className="size-6" strokeWidth={1.5} aria-hidden />
-              </div>
-              <h3 className="font-[family-name:var(--font-syne)] text-xl font-semibold text-white">
-                Mitarbeiter App
-              </h3>
-              <p className="mt-3 flex-1 text-[15px] leading-relaxed text-zinc-400">
-                Recording &amp; KI-Rückfragen direkt an der Maschine.
-              </p>
-              <div className="mt-6 h-px w-full bg-gradient-to-r from-[#00D1FF]/40 via-white/10 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
+            <article className="group relative rounded-2xl border border-white/[0.08] bg-gradient-to-b from-white/[0.06] to-transparent shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)] transition-all duration-300 hover:border-[#00D1FF]/25 hover:shadow-[0_0_48px_-12px_rgba(0,209,255,0.2)]">
+              <Link
+                href="https://www.axon-core.de/worker/login"
+                className="flex h-full flex-col p-8"
+                aria-label="Zur Worker-Anmeldung"
+              >
+                <div className="mb-6 inline-flex size-12 items-center justify-center rounded-xl border border-[#00D1FF]/20 bg-[#00D1FF]/10 text-[#00D1FF] transition-colors group-hover:border-[#00D1FF]/40 group-hover:bg-[#00D1FF]/15">
+                  <Mic2 className="size-6" strokeWidth={1.5} aria-hidden />
+                </div>
+                <h3 className="font-[family-name:var(--font-syne)] text-xl font-semibold text-white">
+                  Konzern App
+                </h3>
+                <p className="mt-3 flex-1 text-[15px] leading-relaxed text-zinc-400">
+                  Recording &amp; KI-Rückfragen direkt an der Maschine.
+                </p>
+                <div className="mt-6 h-px w-full bg-gradient-to-r from-[#00D1FF]/40 via-white/10 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
+              </Link>
             </article>
 
-            <article className="group relative flex flex-col rounded-2xl border border-white/[0.08] bg-gradient-to-b from-white/[0.06] to-transparent p-8 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)] transition-all duration-300 hover:border-[#00D1FF]/25 hover:shadow-[0_0_48px_-12px_rgba(0,209,255,0.2)]">
-              <div className="mb-6 flex size-12 items-center justify-center rounded-xl border border-[#00D1FF]/20 bg-[#00D1FF]/10 text-[#00D1FF] transition-colors group-hover:border-[#00D1FF]/40 group-hover:bg-[#00D1FF]/15">
-                <BarChart3 className="size-6" strokeWidth={1.5} aria-hidden />
-              </div>
-              <h3 className="font-[family-name:var(--font-syne)] text-xl font-semibold text-white">
-                Manager Zentrale
-              </h3>
-              <p className="mt-3 flex-1 text-[15px] leading-relaxed text-zinc-400">
-                Echtzeit-Analytik &amp; Wissens-Priorisierung.
-              </p>
-              <div className="mt-6 h-px w-full bg-gradient-to-r from-[#00D1FF]/40 via-white/10 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
+            <article className="group relative rounded-2xl border border-white/[0.08] bg-gradient-to-b from-white/[0.06] to-transparent shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)] transition-all duration-300 hover:border-[#00D1FF]/25 hover:shadow-[0_0_48px_-12px_rgba(0,209,255,0.2)]">
+              <Link
+                href="/login"
+                className="flex h-full flex-col p-8"
+                aria-label="Zum Konzern-Dashboard Login"
+              >
+                <div className="mb-6 flex size-12 items-center justify-center rounded-xl border border-[#00D1FF]/20 bg-[#00D1FF]/10 text-[#00D1FF] transition-colors group-hover:border-[#00D1FF]/40 group-hover:bg-[#00D1FF]/15">
+                  <BarChart3 className="size-6" strokeWidth={1.5} aria-hidden />
+                </div>
+                <h3 className="font-[family-name:var(--font-syne)] text-xl font-semibold text-white">
+                  Konzern Dashboard
+                </h3>
+                <p className="mt-3 flex-1 text-[15px] leading-relaxed text-zinc-400">
+                  Echtzeit-Analytik &amp; Wissens-Priorisierung.
+                </p>
+                <div className="mt-6 h-px w-full bg-gradient-to-r from-[#00D1FF]/40 via-white/10 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
+              </Link>
             </article>
 
-            <article className="group relative flex flex-col rounded-2xl border border-white/[0.08] bg-gradient-to-b from-white/[0.06] to-transparent p-8 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)] transition-all duration-300 hover:border-[#00D1FF]/25 hover:shadow-[0_0_48px_-12px_rgba(0,209,255,0.2)]">
-              <div className="mb-6 flex size-12 items-center justify-center rounded-xl border border-[#00D1FF]/20 bg-[#00D1FF]/10 text-[#00D1FF] transition-colors group-hover:border-[#00D1FF]/40 group-hover:bg-[#00D1FF]/15">
-                <Coins className="size-6" strokeWidth={1.5} aria-hidden />
-              </div>
-              <h3 className="font-[family-name:var(--font-syne)] text-xl font-semibold text-white">
-                Axon Coins
-              </h3>
-              <p className="mt-3 flex-1 text-[15px] leading-relaxed text-zinc-400">
-                Incentivierung &amp; Blockchain-basierte Rewards.
-              </p>
-              <div className="mt-6 h-px w-full bg-gradient-to-r from-[#00D1FF]/40 via-white/10 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
+            <article className="group relative rounded-2xl border border-white/[0.08] bg-gradient-to-b from-white/[0.06] to-transparent shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)] transition-all duration-300 hover:border-[#00D1FF]/25 hover:shadow-[0_0_48px_-12px_rgba(0,209,255,0.2)]">
+              <Link
+                href="/register?role=private"
+                className="flex h-full flex-col p-8"
+                aria-label="Registrierung als Privatperson für Axon Coins"
+              >
+                <div className="mb-6 flex size-12 items-center justify-center rounded-xl border border-[#00D1FF]/20 bg-[#00D1FF]/10 text-[#00D1FF] transition-colors group-hover:border-[#00D1FF]/40 group-hover:bg-[#00D1FF]/15">
+                  <Coins className="size-6" strokeWidth={1.5} aria-hidden />
+                </div>
+                <h3 className="font-[family-name:var(--font-syne)] text-xl font-semibold text-white">
+                  Axon Coins
+                </h3>
+                <p className="mt-3 flex-1 text-[15px] leading-relaxed text-zinc-400">
+                  Incentivierung &amp; Blockchain-basierte Rewards — für Privatnutzer.
+                </p>
+                <div className="mt-6 h-px w-full bg-gradient-to-r from-[#00D1FF]/40 via-white/10 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
+              </Link>
             </article>
           </div>
         </section>
 
-        {/* CTA */}
+        {/* AxonCore Kleinunternehmer */}
         <section
           id="zugang"
           className="relative mx-auto max-w-6xl px-6 py-16 sm:px-8 sm:py-24"
@@ -166,37 +215,99 @@ export default function Home() {
               aria-hidden
             />
             <h2 className="font-[family-name:var(--font-syne)] relative text-2xl font-semibold tracking-tight text-white sm:text-3xl md:text-4xl">
-              Bereit für das nächste Betriebssystem?
+              AxonCore Kleinunternehmer
             </h2>
-            <p className="relative mx-auto mt-4 max-w-lg text-zinc-400">
-              White-Glove Onboarding für Führungsteams und digitale
-              Transformation auf Konzernniveau.
-            </p>
             <div className="relative mt-10">
-              <a
-                href="#"
-                className="inline-flex h-14 items-center justify-center gap-2 rounded-full border border-[#00D1FF]/50 bg-[#00D1FF] px-10 text-base font-semibold text-[#030304] shadow-[0_0_40px_-6px_rgba(0,209,255,0.5)] transition-all hover:bg-[#33ddff] hover:shadow-[0_0_56px_-4px_rgba(0,209,255,0.55)]"
+              <Link
+                href="/login"
+                className="inline-flex h-14 items-center justify-center rounded-full border border-[#00D1FF]/50 bg-[#00D1FF] px-10 text-base font-semibold text-[#030304] shadow-[0_0_40px_-6px_rgba(0,209,255,0.5)] transition-all hover:bg-[#33ddff] hover:shadow-[0_0_56px_-4px_rgba(0,209,255,0.55)]"
               >
-                Systemzugang anfordern
-                <ArrowRight className="size-5" />
-              </a>
+                Kleinunternehmer Dashboard
+              </Link>
             </div>
           </div>
         </section>
+
+        {team.length > 0 ? (
+          <section
+            id="team"
+            className="relative mx-auto max-w-6xl px-6 pb-24 sm:px-8 sm:pb-32"
+            aria-labelledby="team-heading"
+          >
+            <div className="mb-10">
+              <h2
+                id="team-heading"
+                className="font-[family-name:var(--font-syne)] text-3xl font-semibold tracking-tight text-white sm:text-4xl"
+              >
+                Team
+              </h2>
+              <p className="mt-4 max-w-3xl text-[15px] leading-relaxed text-zinc-400 sm:text-lg">
+                Direkter Draht — ohne Umwege. Persönlich, schnell, enterprise-ready.
+              </p>
+            </div>
+
+            <div className="grid gap-6 md:grid-cols-3 md:gap-8">
+              {team.map((m) => (
+                <article
+                  key={m.id}
+                  className="relative rounded-2xl border border-white/[0.08] bg-gradient-to-b from-white/[0.06] to-transparent p-8 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)]"
+                >
+                  <div className="flex items-center gap-4">
+                    {m.photo_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={m.photo_url}
+                        alt=""
+                        className="h-14 w-14 rounded-full border border-[#D4AF37]/20 object-cover"
+                      />
+                    ) : (
+                      <div className="grid h-14 w-14 place-items-center rounded-full border border-[#D4AF37]/20 bg-[#0b0b0c]">
+                        <span className="font-[family-name:var(--font-syne)] text-sm font-semibold text-[#D4AF37]/80">
+                          AX
+                        </span>
+                      </div>
+                    )}
+                    <div className="min-w-0">
+                      <p className="truncate text-base font-semibold text-white">
+                        {m.name}
+                      </p>
+                      <p className="mt-1 truncate text-sm text-zinc-400">{m.role}</p>
+                    </div>
+                  </div>
+
+                  {(m.email || m.phone) ? (
+                    <div className="mt-6 flex flex-wrap gap-3">
+                      {m.email ? (
+                        <a
+                          href={`mailto:${m.email}`}
+                          className="inline-flex items-center justify-center rounded-full border border-[#D4AF37]/35 bg-[#D4AF37]/10 px-4 py-2 text-xs font-semibold text-[#e9d9a2] transition hover:bg-[#D4AF37]/15"
+                        >
+                          Mail
+                        </a>
+                      ) : null}
+                      {m.phone ? (
+                        <a
+                          href={`tel:${m.phone}`}
+                          className="inline-flex items-center justify-center rounded-full border border-white/[0.12] bg-white/[0.02] px-4 py-2 text-xs font-semibold text-white transition hover:bg-white/[0.04]"
+                        >
+                          Call
+                        </a>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </article>
+              ))}
+            </div>
+          </section>
+        ) : null}
       </main>
 
       {/* Footer */}
-      <footer
-        id="login"
-        className="border-t border-white/[0.06] bg-[#020203]/80 py-10 backdrop-blur-sm"
-      >
-        <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-6 text-center sm:flex-row sm:px-8 sm:text-left">
-          <span className="font-[family-name:var(--font-syne)] text-sm font-medium text-zinc-500">
-            Road to Panama 2026
-          </span>
-          <span className="text-xs text-zinc-600">
+      <footer className="border-t border-white/[0.06] bg-[#020203]/80 py-10 backdrop-blur-sm">
+        <div className="flex w-full justify-center px-6 sm:px-8">
+          <p className="text-center text-xs text-zinc-600">
             © {new Date().getFullYear()} AXON CORE. Alle Rechte vorbehalten.
-          </span>
+          </p>
         </div>
       </footer>
     </div>
