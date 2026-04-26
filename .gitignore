@@ -33,11 +33,16 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# secrets / temp credentials (defensive: any file with "secret" or "token" in its name)
+*secret*.txt
+*token*.txt
+*.tmp.txt
+*.local.txt
+.cron_secret*
+
 # vercel
 .vercel
 
 # typescript
 *.tsbuildinfo
 next-env.d.ts
-
-.vercel
