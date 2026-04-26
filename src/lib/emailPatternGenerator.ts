@@ -13,13 +13,21 @@ function stripAccents(input: string): string {
   return input.normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
 }
 
+/**
+ * WICHTIG: Erst deutsche Umlaute zu DACH-Standard transliterieren
+ * (ae/oe/ue/ss), DANN restliche Diakritika via NFKD entfernen.
+ *
+ * Falsche Reihenfolge ergibt "muller" statt "mueller" — kritisch fuer
+ * B2B-Mail-Zustellung.
+ */
 function sanitizeLocalPart(raw: string): string {
-  return stripAccents(raw)
+  const transliterated = raw
     .toLowerCase()
     .replace(/ß/g, "ss")
     .replace(/ä/g, "ae")
     .replace(/ö/g, "oe")
-    .replace(/ü/g, "ue")
+    .replace(/ü/g, "ue");
+  return stripAccents(transliterated)
     .replace(/[^a-z0-9]+/g, "")
     .replace(/^-+|-+$/g, "");
 }
@@ -135,12 +143,13 @@ export function guessDomainFromCorporateName(
   tld: "de" | "com" = "de",
 ): string | null {
   if (typeof name !== "string") return null;
-  const stripped = stripAccents(name)
+  const transliterated = name
     .toLowerCase()
     .replace(/ß/g, "ss")
     .replace(/ä/g, "ae")
     .replace(/ö/g, "oe")
-    .replace(/ü/g, "ue")
+    .replace(/ü/g, "ue");
+  const stripped = stripAccents(transliterated)
     // Rechtsformen entfernen
     .replace(/\b(ag|se|gmbh|kgaa|kg|ohg|ug|gbr|mbh|co|\&)\b/g, " ")
     .replace(/[^a-z0-9]+/g, " ")
