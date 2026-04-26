@@ -6,7 +6,7 @@ function sanitizeEnv(value: string | undefined) {
   return value.replace(/\s/g, "");
 }
 
-function normalizeDomain(input: string): string | null {
+export function normalizeDomain(input: string): string | null {
   const s = input.trim().toLowerCase();
   if (!s) return null;
   // Accept "example.com" or "https://example.com/path"
