@@ -33,10 +33,41 @@ function getDefaultDemoSlugFromEnv(): string | null {
   );
 }
 
-function buildDashboardDemoUrl(req: NextRequest, slug: string): URL {
-  const u = new URL("/dashboard/konzern", req.url);
+type DemoApp = "konzern" | "worker";
+
+function parseAppParam(raw: string | null): DemoApp {
+  const v = (raw ?? "").trim().toLowerCase();
+  return v === "worker" || v === "mitarbeiter" || v === "werker"
+    ? "worker"
+    : "konzern";
+}
+
+function appBasePath(app: DemoApp): string {
+  return app === "worker" ? "/worker/dashboard" : "/dashboard/konzern";
+}
+
+function buildDashboardDemoUrl(
+  req: NextRequest,
+  slug: string,
+  app: DemoApp,
+): URL {
+  const u = new URL(appBasePath(app), req.url);
   u.searchParams.set("demo", slug);
   return u;
+}
+
+/**
+ * Hängt `?demo=<slug>` an eine vorhandene Demo-URL an, ersetzt aber den Pfad
+ * passend zur App-Wahl (z.B. /dashboard/konzern -> /worker/dashboard).
+ */
+function rewriteDemoUrlForApp(demoUrl: string, app: DemoApp): string {
+  try {
+    const u = new URL(demoUrl);
+    u.pathname = appBasePath(app);
+    return u.toString();
+  } catch {
+    return demoUrl;
+  }
 }
 
 export async function GET(
@@ -46,6 +77,10 @@ export async function GET(
   const { token } = await context.params;
   const t = cleanToken(token);
   if (!t) return NextResponse.redirect(new URL("/demo-anfordern", req.url));
+
+  // Welche App soll der Lead sehen? `?app=worker` -> Mitarbeiter-App,
+  // sonst Konzern-Dashboard (Default fuer Manager/Entscheider).
+  const app = parseAppParam(req.nextUrl.searchParams.get("app"));
 
   let service;
   try {
@@ -81,6 +116,7 @@ export async function GET(
     metadata: {
       lead_id: leadId,
       token: t,
+      app,
       ua: req.headers.get("user-agent") ?? null,
       ip:
         req.headers.get("x-forwarded-for") ??
@@ -108,6 +144,7 @@ export async function GET(
       metadata: {
         source: "demo_link",
         token: t,
+        app,
         ua: req.headers.get("user-agent") ?? null,
       },
     });
@@ -145,7 +182,7 @@ export async function GET(
       .maybeSingle();
 
     if (existing.data?.id) {
-      return NextResponse.redirect(buildDashboardDemoUrl(req, domain));
+      return NextResponse.redirect(buildDashboardDemoUrl(req, domain, app));
     }
 
     // Fallback: erstmaliger Klick für diese Domain -> Demo on-the-fly anlegen
@@ -156,7 +193,7 @@ export async function GET(
       const result = await generateAutomatedDemo(domain, {
         baseUrl: new URL(req.url).origin,
       });
-      return NextResponse.redirect(new URL(result.demoUrl));
+      return NextResponse.redirect(new URL(rewriteDemoUrlForApp(result.demoUrl, app)));
     } catch (err) {
       console.warn(
         "[demo-link] generateAutomatedDemo fehlgeschlagen, prüfe Default-Demo:",
@@ -168,7 +205,7 @@ export async function GET(
   // 2) Fallback: Default-Demo aus ENV (z.B. AXON_LEAD_DEMO_SLUG=siemens.com).
   const defaultSlug = getDefaultDemoSlugFromEnv();
   if (defaultSlug) {
-    return NextResponse.redirect(buildDashboardDemoUrl(req, defaultSlug));
+    return NextResponse.redirect(buildDashboardDemoUrl(req, defaultSlug, app));
   }
 
   // 3) Letzter Fallback: bisheriges Verhalten - Anfrage-Formular mit Prefill.

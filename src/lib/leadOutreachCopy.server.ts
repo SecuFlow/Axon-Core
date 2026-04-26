@@ -134,11 +134,12 @@ function defaultMessage(kind: MessageKind, lead: LeadInput): { subject: string; 
     };
   }
   return {
-    subject: `Demo für ${locationLabel} – Link & nächste Schritte`,
+    subject: `Demo für ${locationLabel} – Manager- & Werker-Sicht`,
     body:
       `${hi},\n\n` +
-      `wie besprochen: hier ist der Demo‑Einstieg. Ich führe Sie in 15 Minuten durch Standort‑Setup, Maschineninventar und den Wissens‑Safeguard‑Flow.\n\n` +
-      `Demo‑Link: (wird im nächsten Schritt eingefügt)\n\n` +
+      `wie besprochen: anbei zwei Direkt‑Einstiege in eine vorbereitete Demo zu ${locationLabel}.\n\n` +
+      `Der Konzern‑Link führt in das Manager‑Dashboard mit KPIs, Standortübersicht und Maschinen‑Inventar. Der Mitarbeiter‑Link zeigt die Werker‑Sicht direkt an der Maschine — dort wird Wissen sekundenschnell gesichert.\n\n` +
+      `Wenn Sie nach dem Reinschauen 15 Minuten Zeit haben, gehe ich gerne mit Ihnen die nächsten Schritte für ${locationLabel} durch.\n\n` +
       `Viele Grüße\nElias Stadler`,
   };
 }
@@ -177,6 +178,9 @@ export async function generateOutreachMessage(input: {
       "Keine technischen IDs, keine Slugs, keine Demo-/Test-Wörter. " +
       "Format: Betreff + Body. Body als Plaintext mit Absätzen, ohne Markdown. " +
       "Länge: 110–170 Wörter. Klare Frage am Ende (Call-to-Action)." +
+      (input.kind === "demo"
+        ? " WICHTIG: Im Anschluss an Deinen Body werden automatisch zwei Demo-Links angehängt — einer für das Konzern-Dashboard (Manager-Sicht: KPIs, Standorte, Maschinen) und einer für die Mitarbeiter-App (Werker-Sicht direkt an der Maschine). Führe diese beiden Sichten im Body inhaltlich ein, ABER schreibe selbst KEINE Links, KEINE URLs und KEINE Platzhalter — diese werden technisch ergänzt."
+        : "") +
       personalizationHint;
 
   const user =

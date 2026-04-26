@@ -531,7 +531,11 @@ export async function runLeadmaschine(input: {
       },
     });
 
-    let demoLink: string | null = null;
+    // Enterprise-Demo (Mail #3): zwei Demo-Links — Konzern-Dashboard (Manager-Sicht)
+    // + Mitarbeiter-App (Werker-Sicht). Beide nutzen den gleichen Token, das
+    // `?app`-Query unterscheidet das Redirect-Ziel im Token-Resolver.
+    let demoLinkKonzern: string | null = null;
+    let demoLinkWorker: string | null = null;
     if (kind === "demo" && seg === "enterprise") {
       try {
         const ensured = await ensureLeadDemoLink({
@@ -540,11 +544,16 @@ export async function runLeadmaschine(input: {
           actorId,
         });
         const base = getPublicSiteUrlFromEnv();
-        demoLink = base
+        const tokenUrl = base
           ? `${base}/api/public/demo-link/${encodeURIComponent(ensured.token)}`
           : ensured.url;
+        if (tokenUrl) {
+          demoLinkKonzern = `${tokenUrl}?app=konzern`;
+          demoLinkWorker = `${tokenUrl}?app=worker`;
+        }
       } catch {
-        demoLink = null;
+        demoLinkKonzern = null;
+        demoLinkWorker = null;
       }
     }
 
@@ -552,9 +561,13 @@ export async function runLeadmaschine(input: {
     const subject = appendReplyTokenToSubject(msg.subject, replyToken);
 
     const bookingUrl = kind === "demo" && seg === "smb" ? getSmbBookingUrlFromEnv() : null;
+    const demoLinksBlock =
+      demoLinkKonzern && demoLinkWorker
+        ? `\n\nKonzern‑Dashboard (Manager-Sicht):\n${demoLinkKonzern}\n\nMitarbeiter‑App (Werker-Sicht direkt an der Maschine):\n${demoLinkWorker}`
+        : "";
     const body =
-      kind === "demo" && seg === "enterprise" && demoLink
-        ? `${msg.body}\n\nDemo‑Link: ${demoLink}`
+      kind === "demo" && seg === "enterprise" && demoLinksBlock
+        ? `${msg.body}${demoLinksBlock}`
         : kind === "demo" && seg === "smb" && bookingUrl
           ? `${msg.body}\n\nBeratungsgespräch buchen: ${bookingUrl}`
           : msg.body;
@@ -567,7 +580,12 @@ export async function runLeadmaschine(input: {
         reply_token: replyToken,
         subject,
         body,
-        metadata: { model: msg.model, actor: actorId, demo_link: demoLink },
+        metadata: {
+          model: msg.model,
+          actor: actorId,
+          demo_link_konzern: demoLinkKonzern,
+          demo_link_worker: demoLinkWorker,
+        },
       })
       .select("id")
       .single();
