@@ -1,0 +1,151 @@
+"use client";
+
+import Link from "next/link";
+import { FormEvent, Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+
+function LoginPageInner() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (searchParams.get("mode") === "register") {
+      router.replace("/register");
+    }
+  }, [searchParams, router]);
+
+  const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError(null);
+    setIsLoading(true);
+
+    try {
+      const resp = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email,
+          password,
+          flow: "konzern",
+          accountType: "enterprise",
+        }),
+      });
+
+      const payload: { error?: string; redirect?: string } = await resp.json();
+
+      if (!resp.ok) {
+        setError(payload.error ?? "Login fehlgeschlagen");
+        return;
+      }
+
+      const target =
+        typeof payload.redirect === "string" && payload.redirect.length > 0
+          ? payload.redirect
+          : "/checkout";
+
+      if (target.startsWith("http://") || target.startsWith("https://")) {
+        window.location.href = target;
+        return;
+      }
+
+      router.push(target.startsWith("/") ? target : `/${target}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-black px-6 py-12 text-zinc-100">
+      <section className="w-full max-w-md rounded-2xl border border-white/[0.08] bg-[#121212] p-7 shadow-[0_18px_60px_-28px_rgba(0,0,0,0.85),inset_0_1px_0_0_rgba(255,255,255,0.04)]">
+        <h1 className="font-[family-name:var(--font-syne)] text-2xl font-semibold tracking-tight text-white">
+          Login
+        </h1>
+        <p className="mt-2 text-[13px] leading-relaxed text-zinc-500">
+          Melde dich mit E-Mail und Passwort an.
+        </p>
+
+        <form onSubmit={handleLogin} className="mt-6 space-y-4" autoComplete="on">
+          <div>
+            <label
+              className="mb-1.5 block text-[12px] font-medium text-zinc-300"
+              htmlFor="login-email"
+            >
+              E-Mail
+            </label>
+            <input
+              id="login-email"
+              type="email"
+              required
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              autoComplete="email"
+              className="w-full rounded-lg border border-white/[0.12] bg-[#0a0a0a] px-3 py-2.5 text-sm text-zinc-100 outline-none transition focus:border-[#00D1FF]/55 focus:ring-1 focus:ring-[#00D1FF]/25"
+            />
+          </div>
+          <div>
+            <label
+              className="mb-1.5 block text-[12px] font-medium text-zinc-300"
+              htmlFor="login-password"
+            >
+              Passwort
+            </label>
+            <input
+              id="login-password"
+              type="password"
+              required
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              autoComplete="current-password"
+              className="w-full rounded-lg border border-white/[0.12] bg-[#0a0a0a] px-3 py-2.5 text-sm text-zinc-100 outline-none transition focus:border-[#00D1FF]/55 focus:ring-1 focus:ring-[#00D1FF]/25"
+            />
+          </div>
+
+          {error ? <p className="text-sm text-red-300">{error}</p> : null}
+
+          <button
+            type="submit"
+            disabled={isLoading}
+            className="inline-flex h-11 w-full items-center justify-center rounded-xl bg-[#00D1FF] px-6 text-sm font-semibold text-[#031018] transition hover:bg-[#33ddff] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isLoading ? "Login läuft…" : "Einloggen"}
+          </button>
+        </form>
+
+        <p className="mt-6 text-center text-[13px] text-[#6b5c4c]">
+          Noch kein Konto?{" "}
+          <Link
+            href="/register"
+            className="font-medium text-[#00D1FF] transition hover:underline"
+          >
+            Registrieren
+          </Link>
+        </p>
+
+        <Link
+          href="/"
+          className="mt-3 inline-block w-full text-center text-[13px] font-medium text-[#00D1FF] transition hover:underline"
+        >
+          Zurück zur Startseite
+        </Link>
+      </section>
+    </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="flex min-h-screen items-center justify-center bg-black px-6 text-zinc-500">
+          Lädt…
+        </main>
+      }
+    >
+      <LoginPageInner />
+    </Suspense>
+  );
+}
