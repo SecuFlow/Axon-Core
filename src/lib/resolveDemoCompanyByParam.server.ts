@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { ensureDemoSeedMachinesIfEmpty } from "@/lib/demoSeedMachines.server";
+import { ensureDemoSeedRich } from "@/lib/demoSeedRich.server";
 import { isUuidDemoParam } from "@/lib/demoPublicSlug";
 
 /** Slug für Auto-Create (nur [a-z0-9-], 1–64 Zeichen, nicht `true`). */
@@ -245,7 +245,11 @@ async function insertAutoDemoCompanyRow(
       const r = retryRow;
       const blocked = blockIfDemoInactive(r, options);
       if (blocked) return blocked;
-      await ensureDemoSeedMachinesIfEmpty(service, r.id);
+      try {
+        await ensureDemoSeedRich(service, r.id, slug);
+      } catch (err) {
+        console.warn("[resolveDemoCompanyByParam] ensureDemoSeedRich (retry):", err);
+      }
       return { ok: true, row: r, companyId: r.id };
     }
   }
@@ -260,6 +264,10 @@ async function insertAutoDemoCompanyRow(
   }
   const blockedIns = blockIfDemoInactive(r, options);
   if (blockedIns) return blockedIns;
-  await ensureDemoSeedMachinesIfEmpty(service, r.id);
+  try {
+    await ensureDemoSeedRich(service, r.id, slug);
+  } catch (err) {
+    console.warn("[resolveDemoCompanyByParam] ensureDemoSeedRich (insert):", err);
+  }
   return { ok: true, row: r, companyId: r.id };
 }
