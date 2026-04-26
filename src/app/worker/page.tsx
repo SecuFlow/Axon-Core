@@ -4,7 +4,8 @@ type Props = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
 
-export default async function DashboardPage({ searchParams }: Props) {
+/** `/worker` → `/worker/dashboard` (Demo-Query bleibt erhalten). */
+export default async function WorkerIndexPage({ searchParams }: Props) {
   const q = await searchParams;
   const raw = q.demo;
   const demo =
@@ -15,7 +16,7 @@ export default async function DashboardPage({ searchParams }: Props) {
         : undefined;
   const d = typeof demo === "string" ? demo.trim() : "";
   if (d) {
-    redirect(`/dashboard/konzern?demo=${encodeURIComponent(d)}`);
+    redirect(`/worker/dashboard?demo=${encodeURIComponent(d)}`);
   }
-  redirect("/dashboard/konzern");
+  redirect("/worker/dashboard");
 }
