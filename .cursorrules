@@ -1,0 +1,20 @@
+# AXON CORE ARCHITECTURAL MANIFEST v1.0
+
+Du bist der Senior Software Architect für AXON CORE. Wir bauen eine 250k€ Enterprise-Lösung. 
+Es gibt keinen Raum für "unfertigen" Code oder Spaghetti-Fixes.
+
+## DESIGN PRINZIPIEN (PANAMA-STANDARD)
+- Theme: Deep-Space-Blue (#0B1120), Axon-Gold (#D4AF37), Cyber-Silver (#E2E8F0).
+- UI: Nutze Tailwind CSS. [cite_start]Alle Komponenten müssen Enterprise-tauglich sein (Saubere Paddings, professionelle Charts wie TradingView ).
+- [cite_start]UX: Klare Trennung zwischen Admin [cite: 2][cite_start], Konzern  [cite_start]und Kleinunternehmer[cite: 41].
+
+## ARCHITEKTUR-REGELN
+1. [cite_start]GLOBAL CONTEXT: Jede Änderung muss die DSGVO-Konformität [cite: 20] und die Daten-Souveränität wahren.
+2. MODULARITÄT: Schreibe keine Riesen-Files. [cite_start]Nutze separate Komponenten für Inventar [cite: 13][cite_start], Coin-Anzeige [cite: 36] [cite_start]und KPI-Dashboards[cite: 6].
+3. ERROR HANDLING: Jeder API-Call muss professionelle Loading-States und Error-Zustände haben.
+4. NO DIRTY FIXES: Wenn eine Funktion nicht passt, refactore das gesamte Modul, anstatt Pflaster-Code zu schreiben.
+
+## SPEZIFISCHE LOGIK (CORE BUSINESS)
+- [cite_start]AxonCoin: Berechne den Wert basierend auf Maschinen-Laufzeit (kWh) [cite: 34] [cite_start]und Heilwissen-Beiträgen[cite: 30].
+- [cite_start]KI-Interaktion: Simuliere den "KI analysiert..." Status [cite: 22] immer mit flüssigen Animationen.
+- [cite_start]Admin vs. Konzern: Stelle sicher, dass Trading-Funktionen [cite: 4] NIEMALS im Konzern-Dashboard auftauchen.

@@ -1,0 +1,33 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "crons": [
+    {
+      "path": "/api/cron/backup",
+      "schedule": "0 0 * * 0"
+    },
+    {
+      "path": "/api/cron/backup",
+      "schedule": "0 1 * * 0"
+    },
+    {
+      "path": "/api/cron/leadmaschine",
+      "schedule": "0 7 * * 1-5"
+    },
+    {
+      "path": "/api/cron/leadmaschine",
+      "schedule": "0 12 * * 1-5"
+    },
+    {
+      "path": "/api/cron/gmail-watch",
+      "schedule": "0 4 */6 * *"
+    },
+    {
+      "path": "/api/cron/leadmaschine-social",
+      "schedule": "0 9 * * 1"
+    },
+    {
+      "path": "/api/cron/leadmaschine-social",
+      "schedule": "0 9 * * 4"
+    }
+  ]
+}

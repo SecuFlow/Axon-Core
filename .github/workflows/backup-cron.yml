@@ -1,0 +1,35 @@
+# Alternative / Ergänzung zu Vercel Cron: ruft GET /api/cron/backup auf.
+# Nicht parallel zu Vercel-Cron aktivieren — sonst doppelte Backups pro Woche möglich.
+#
+# Einrichtung (Repository → Settings → Secrets and variables → Actions):
+#   BACKUP_CRON_URL     z. B. https://<dein-projekt>.vercel.app/api/cron/backup
+#   BACKUP_CRON_SECRET  gleicher Wert wie CRON_SECRET / AXON_CRON_SECRET in Vercel
+#
+# Ohne diese Secrets wird der Job bei jedem Trigger übersprungen (kein Fehler).
+
+name: Backup (Cron-API)
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Sonntag 00:00 und 01:00 UTC — deckt So 02:00 Europe/Berlin (CEST/CET) ab; ein Lauf wird serverseitig ggf. skipped.
+    - cron: "0 0 * * 0"
+    - cron: "0 1 * * 0"
+
+permissions:
+  contents: read
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    if: ${{ secrets.BACKUP_CRON_URL != '' && secrets.BACKUP_CRON_SECRET != '' }}
+    steps:
+      - name: Backup-Endpoint aufrufen
+        env:
+          URL: ${{ secrets.BACKUP_CRON_URL }}
+          SECRET: ${{ secrets.BACKUP_CRON_SECRET }}
+        run: |
+          curl --fail-with-body --silent --show-error \
+            --request GET \
+            --url "$URL" \
+            --header "Authorization: Bearer $SECRET"
