@@ -2,37 +2,34 @@
 
 import { useState } from "react";
 import { LeadmaschineClient } from "./LeadmaschineClient";
-import { MatrixRissSection } from "./MatrixRissSection";
-import { LinkedInProspectsSection } from "./LinkedInProspectsSection";
+import { ApolloDiscoverySection } from "./ApolloDiscoverySection";
 import { SocialCenterSection } from "./SocialCenterSection";
 
-type TabKey = "pipeline" | "matrix" | "prospects" | "social";
+type TabKey = "pipeline" | "apollo" | "social";
 
 const TABS: Array<{ key: TabKey; label: string; hint: string }> = [
   { key: "pipeline", label: "Email-Pipeline", hint: "Tag 1 · 3 · 5" },
-  { key: "matrix", label: "Matrix-Riss", hint: "Google-Dorks" },
-  { key: "prospects", label: "LinkedIn Prospects", hint: "Vernetzen → Leads" },
-  { key: "social", label: "KI Social Center", hint: "Posts · Kommentare" },
+  { key: "apollo", label: "Apollo Discovery", hint: "Auto-Lead-Suche" },
+  { key: "social", label: "KI Social Center", hint: "LinkedIn-Posts" },
 ];
 
 export function LeadmaschineTabs() {
   const [tab, setTab] = useState<TabKey>("pipeline");
-  const [prospectsVersion, setProspectsVersion] = useState(0);
 
   return (
     <div className="space-y-6">
-      {/* DSGVO/UWG Banner */}
+      {/* UWG-Banner */}
       <div className="rounded-md border border-[#c9a962]/30 bg-[#c9a962]/[0.05] p-3">
         <p className="font-mono text-[10px] leading-relaxed text-[#d4c896]">
-          <span className="font-semibold uppercase tracking-[0.14em]">DSGVO / UWG §7 konform</span>
+          <span className="font-semibold uppercase tracking-[0.14em]">UWG §7 · Eigene Risikoabwägung</span>
           {" · "}
           <span className="text-[#bcb087]">
-            Max. 5 neue Erstkontakte pro Tag. Ablauf: Tag 1 Email → Tag 3 Follow-Up → Tag 5 Demo-Einladung.
+            Tages-Cap: bis zu 30 neue Erstkontakte/Tag (konfigurierbar). Schutzschichten aktiv:
+            Generic-Mailbox-Block, Manager-Pflicht, Pro-Lead-Sperre. Ablauf: Tag 1 Erstkontakt → Tag 3 Follow-Up → Tag 5 Demo.
           </span>
         </p>
       </div>
 
-      {/* Tabs */}
       <nav className="flex flex-wrap gap-2 border-b border-[#1a1a1a] pb-3">
         {TABS.map((t) => (
           <button
@@ -53,17 +50,9 @@ export function LeadmaschineTabs() {
         ))}
       </nav>
 
-      {/* Active Tab Body */}
       <div>
         {tab === "pipeline" ? <LeadmaschineClient /> : null}
-        {tab === "matrix" ? (
-          <MatrixRissSection
-            onProspectCreated={() => setProspectsVersion((v) => v + 1)}
-          />
-        ) : null}
-        {tab === "prospects" ? (
-          <LinkedInProspectsSection version={prospectsVersion} />
-        ) : null}
+        {tab === "apollo" ? <ApolloDiscoverySection /> : null}
         {tab === "social" ? <SocialCenterSection /> : null}
       </div>
     </div>

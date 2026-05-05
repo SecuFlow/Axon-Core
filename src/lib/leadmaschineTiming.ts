@@ -9,13 +9,26 @@ export function sequenceFollowUpDays(
 }
 
 /**
- * DSGVO/UWG Hard-Cap fuer neue Erstkontakte pro Kalendertag und Segment.
+ * Harter Tages-Cap fuer NEUE Erstkontakte (mail_1) pro Segment.
  *
- * Diese Konstante ist die Single-Source-of-Truth im Code. Sie ueberschreibt
- * den DB-Wert `leadmaschine_settings.leads_per_day_*` und ist im Admin-UI
- * nicht editierbar. Follow-Ups (Tag 3) und Demos (Tag 5) zaehlen nicht gegen
- * diesen Cap - nur mail_1_sent wird gezaehlt.
+ * Diese Konstante ist eine Sicherheits-Obergrenze, die DB-Werte von
+ * `leadmaschine_settings.leads_per_day_*` capped. Ueberschreitet die
+ * Settings-Konfiguration diesen Wert, wird im Runner auf diesen Wert
+ * geclampt.
  *
- * Begruendung: Abstandsgebot / Spam-Vermeidung gemaess DSGVO + UWG §7.
+ * Historie:
+ *   - vorher 5/Tag (DSGVO/UWG-konservativ, hartcodiert, nicht editierbar)
+ *   - ab 05/2026: 30/Tag (bewusste Geschaeftsentscheidung, Editierbarkeit
+ *     im Admin-UI freigegeben).
+ *
+ * UWG-Risiko-Hinweis (nicht entfernen):
+ *   B2B-Direktansprache an konkrete Entscheider ohne mutmassliche
+ *   Einwilligung gemaess UWG §7 Abs. 2 Nr. 3 ist unzulaessig. Die Erhoehung
+ *   auf 30/Tag ist eine bewusst akzeptierte Entscheidung des Plattform-
+ *   Inhabers. Die folgenden Schutzschichten bleiben aktiv:
+ *     - GENERIC_MAILBOX_LOCAL_PARTS-Block (kein info@/kontakt@)
+ *     - manager_name-Pflicht (kein Versand ohne konkreten Entscheider)
+ *     - leads.auto_send_blocked als Pro-Lead-Notbremse
+ *   Folg-Ups (Tag 3) und Demos (Tag 5) zaehlen NICHT gegen diesen Cap.
  */
-export const LEAD_DAILY_HARD_CAP = 5;
+export const LEAD_DAILY_HARD_CAP = 30;

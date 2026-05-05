@@ -10,7 +10,7 @@ const NO_STORE_HEADERS = {
 } as const;
 
 const SELECT_COLUMNS =
-  "id, created_at, updated_at, type, target_prospect_id, source_post_text, text_draft, model, is_posted, scheduled_for, posted_at, metadata";
+  "id, created_at, updated_at, type, text_draft, model, is_posted, scheduled_for, posted_at, metadata";
 
 function isTableMissingError(message: string): boolean {
   const m = message.toLowerCase();
@@ -28,10 +28,14 @@ function tableMissingResponse() {
 }
 
 /**
- * GET /api/admin/leadmaschine/social/post?type=post|comment
- * Liefert alle Content-Pool-Eintraege (beide Typen, wenn kein Filter).
+ * GET /api/admin/leadmaschine/social/post
+ * Liefert Post-Entwuerfe (LinkedIn).
+ *
+ * Comment-Drafts wurden mit dem Apollo-Pivot eingestellt (frueher an
+ * linkedin_prospects gekoppelt). Diese Route filtert ausschliesslich
+ * type=post.
  */
-export async function GET(request: NextRequest) {
+export async function GET(_request: NextRequest) {
   const ctx = await requireAdminMutationContext();
   if (!ctx.ok) {
     return NextResponse.json(
@@ -40,45 +44,22 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const typeFilter = (request.nextUrl.searchParams.get("type") ?? "").trim().toLowerCase();
-
-  let q = ctx.service
+  const res = await ctx.service
     .from("content_pool")
-    .select(
-      `${SELECT_COLUMNS}, prospect:linkedin_prospects!target_prospect_id(id, manager_name, corporate_group_name, location_name)`,
-    )
+    .select(SELECT_COLUMNS)
+    .eq("type", "post")
     .order("created_at", { ascending: false })
     .limit(200);
 
-  if (typeFilter === "post" || typeFilter === "comment") {
-    q = q.eq("type", typeFilter);
-  }
-
-  const res = await q;
   if (res.error) {
     if (isTableMissingError(res.error.message)) return tableMissingResponse();
-    // Fallback ohne JOIN falls FK-Definition noch nicht greift.
-    const fallback = await ctx.service
-      .from("content_pool")
-      .select(SELECT_COLUMNS)
-      .order("created_at", { ascending: false })
-      .limit(200);
-    if (fallback.error) {
-      return NextResponse.json(
-        { error: fallback.error.message },
-        { status: 500, headers: NO_STORE_HEADERS },
-      );
-    }
     return NextResponse.json(
-      { items: fallback.data ?? [] },
-      { headers: NO_STORE_HEADERS },
+      { error: res.error.message },
+      { status: 500, headers: NO_STORE_HEADERS },
     );
   }
 
-  return NextResponse.json(
-    { items: res.data ?? [] },
-    { headers: NO_STORE_HEADERS },
-  );
+  return NextResponse.json({ items: res.data ?? [] }, { headers: NO_STORE_HEADERS });
 }
 
 /**

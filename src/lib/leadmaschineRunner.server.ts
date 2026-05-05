@@ -194,14 +194,15 @@ async function getSettings(service: SupabaseClient): Promise<Settings> {
     // Tabelle fehlt oder RLS/Schema noch nicht aktiv: sichere Defaults
     return {
       enabled: true,
-      leads_per_month: 150,
+      leads_per_month: 600,
       max_actions_per_run: 10,
-      leads_per_month_enterprise: 150,
-      leads_per_month_smb: 150,
+      leads_per_month_enterprise: 600,
+      leads_per_month_smb: 300,
       max_actions_per_run_enterprise: 10,
       max_actions_per_run_smb: 10,
-      leads_per_day_enterprise: LEAD_DAILY_HARD_CAP,
-      leads_per_day_smb: LEAD_DAILY_HARD_CAP,
+      // Default-Split: 20 Enterprise + 10 SMB = 30/Tag (entspricht LEAD_DAILY_HARD_CAP)
+      leads_per_day_enterprise: Math.min(20, LEAD_DAILY_HARD_CAP),
+      leads_per_day_smb: Math.min(10, LEAD_DAILY_HARD_CAP),
       min_seconds_between_gmail_sends: 120,
       auto_send_enabled: false,
     };
@@ -247,10 +248,16 @@ async function getSettings(service: SupabaseClient): Promise<Settings> {
           : 10,
     max_actions_per_run_smb:
       typeof row?.max_actions_per_run_smb === "number" ? row.max_actions_per_run_smb : 10,
-    // Tages-Cap ist durch LEAD_DAILY_HARD_CAP (Code-Konstante) hart fixiert.
-    // DB-Werte werden ignoriert - DSGVO/UWG-Hard-Cap, im Admin-UI nicht editierbar.
-    leads_per_day_enterprise: LEAD_DAILY_HARD_CAP,
-    leads_per_day_smb: LEAD_DAILY_HARD_CAP,
+    // Tages-Cap: DB-Wert wird genutzt, am Code-seitigen Hard-Cap clampen.
+    // (LEAD_DAILY_HARD_CAP = 30, bewusste Geschaeftsentscheidung; siehe leadmaschineTiming.ts).
+    leads_per_day_enterprise:
+      typeof row?.leads_per_day_enterprise === "number"
+        ? clampInt(row.leads_per_day_enterprise, 0, LEAD_DAILY_HARD_CAP)
+        : Math.min(20, LEAD_DAILY_HARD_CAP),
+    leads_per_day_smb:
+      typeof row?.leads_per_day_smb === "number"
+        ? clampInt(row.leads_per_day_smb, 0, LEAD_DAILY_HARD_CAP)
+        : Math.min(10, LEAD_DAILY_HARD_CAP),
     min_seconds_between_gmail_sends:
       typeof row?.min_seconds_between_gmail_sends === "number"
         ? row.min_seconds_between_gmail_sends
@@ -328,8 +335,8 @@ export async function runLeadmaschine(input: {
   const maxPerRunSmb = clampInt(settings.max_actions_per_run_smb, 1, 50);
   const monthlyLimitEnterprise = clampInt(settings.leads_per_month_enterprise, 1, 2000);
   const monthlyLimitSmb = clampInt(settings.leads_per_month_smb, 1, 2000);
-  const dailyLimitEnterprise = clampInt(settings.leads_per_day_enterprise, 1, 500);
-  const dailyLimitSmb = clampInt(settings.leads_per_day_smb, 1, 500);
+  const dailyLimitEnterprise = clampInt(settings.leads_per_day_enterprise, 0, LEAD_DAILY_HARD_CAP);
+  const dailyLimitSmb = clampInt(settings.leads_per_day_smb, 0, LEAD_DAILY_HARD_CAP);
 
   if (!settings.enabled) {
     return {

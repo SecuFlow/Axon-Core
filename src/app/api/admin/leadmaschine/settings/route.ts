@@ -9,6 +9,28 @@ const NO_STORE_HEADERS = {
   "Cache-Control": "private, no-store",
 } as const;
 
+const APOLLO_COLUMNS = [
+  "apollo_enabled",
+  "apollo_leads_per_day_enterprise",
+  "apollo_leads_per_day_smb",
+  "apollo_person_titles_enterprise",
+  "apollo_person_titles_smb",
+  "apollo_person_locations",
+  "apollo_person_seniorities",
+  "apollo_org_employee_min",
+  "apollo_org_employee_max",
+  "apollo_org_employee_min_smb",
+  "apollo_org_employee_max_smb",
+  "apollo_industries",
+  "apollo_industries_smb",
+  "apollo_reveal_personal_emails",
+] as const;
+
+const SELECT_ALL =
+  "id, enabled, leads_per_month, max_actions_per_run, leads_per_month_enterprise, leads_per_month_smb, max_actions_per_run_enterprise, max_actions_per_run_smb, leads_per_day_enterprise, leads_per_day_smb, min_seconds_between_gmail_sends, auto_send_enabled, " +
+  APOLLO_COLUMNS.join(", ") +
+  ", updated_at";
+
 function clampInt(n: number, min: number, max: number) {
   if (!Number.isFinite(n)) return min;
   return Math.max(min, Math.min(max, Math.round(n)));
@@ -23,21 +45,68 @@ function isTableMissingError(message: string): boolean {
   );
 }
 
+function asStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const out: string[] = [];
+  for (const v of value) {
+    if (typeof v === "string" && v.trim()) out.push(v.trim().slice(0, 128));
+  }
+  return out;
+}
+
+function defaultsResponse() {
+  return {
+    enabled: true,
+    leads_per_month: 600,
+    max_actions_per_run: 10,
+    leads_per_month_enterprise: 600,
+    leads_per_month_smb: 300,
+    max_actions_per_run_enterprise: 10,
+    max_actions_per_run_smb: 10,
+    leads_per_day_enterprise: 20,
+    leads_per_day_smb: 10,
+    leads_per_day_hard_cap: LEAD_DAILY_HARD_CAP,
+    min_seconds_between_gmail_sends: 120,
+    auto_send_enabled: false,
+    apollo_enabled: false,
+    apollo_leads_per_day_enterprise: 20,
+    apollo_leads_per_day_smb: 10,
+    apollo_person_titles_enterprise: [
+      "Werkleiter",
+      "Standortleiter",
+      "Plant Manager",
+      "Betriebsleiter",
+    ],
+    apollo_person_titles_smb: ["Geschäftsführer", "Inhaber", "CEO", "Owner", "Founder"],
+    apollo_person_locations: ["Germany", "Austria", "Switzerland"],
+    apollo_person_seniorities: ["c_suite", "vp", "head", "director", "manager", "owner", "founder"],
+    apollo_org_employee_min: 100,
+    apollo_org_employee_max: 5000,
+    apollo_org_employee_min_smb: 5,
+    apollo_org_employee_max_smb: 99,
+    apollo_industries: [] as string[],
+    apollo_industries_smb: [] as string[],
+    apollo_reveal_personal_emails: false,
+  };
+}
+
 export async function GET() {
   const ctx = await requireAdminMutationContext();
   if (!ctx.ok) {
-    return NextResponse.json({ error: ctx.error }, { status: ctx.status, headers: NO_STORE_HEADERS });
+    return NextResponse.json(
+      { error: ctx.error },
+      { status: ctx.status, headers: NO_STORE_HEADERS },
+    );
   }
 
   let res = await ctx.service
     .from("leadmaschine_settings")
-    .select(
-      "id, enabled, leads_per_month, max_actions_per_run, leads_per_month_enterprise, leads_per_month_smb, max_actions_per_run_enterprise, max_actions_per_run_smb, leads_per_day_enterprise, leads_per_day_smb, min_seconds_between_gmail_sends, auto_send_enabled, updated_at",
-    )
+    .select(SELECT_ALL)
     .order("updated_at", { ascending: false })
     .limit(1)
     .maybeSingle();
 
+  // Migration noch nicht durch: legacy fallback ohne Apollo-Spalten.
   if (
     res.error &&
     (res.error.message.toLowerCase().includes("column") ||
@@ -46,22 +115,7 @@ export async function GET() {
     res = await ctx.service
       .from("leadmaschine_settings")
       .select(
-        "id, enabled, leads_per_month, max_actions_per_run, leads_per_month_enterprise, leads_per_month_smb, max_actions_per_run_enterprise, max_actions_per_run_smb, leads_per_day_enterprise, leads_per_day_smb, min_seconds_between_gmail_sends, updated_at",
-      )
-      .order("updated_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-  }
-
-  if (
-    res.error &&
-    (res.error.message.toLowerCase().includes("column") ||
-      res.error.message.toLowerCase().includes("does not exist"))
-  ) {
-    res = await ctx.service
-      .from("leadmaschine_settings")
-      .select(
-        "id, enabled, leads_per_month, max_actions_per_run, leads_per_month_enterprise, leads_per_month_smb, max_actions_per_run_enterprise, max_actions_per_run_smb, updated_at",
+        "id, enabled, leads_per_month, max_actions_per_run, leads_per_month_enterprise, leads_per_month_smb, max_actions_per_run_enterprise, max_actions_per_run_smb, leads_per_day_enterprise, leads_per_day_smb, min_seconds_between_gmail_sends, auto_send_enabled, updated_at",
       )
       .order("updated_at", { ascending: false })
       .limit(1)
@@ -70,23 +124,7 @@ export async function GET() {
 
   if (res.error) {
     if (isTableMissingError(res.error.message)) {
-      return NextResponse.json(
-        {
-          enabled: true,
-          leads_per_month: 150,
-          max_actions_per_run: 10,
-          leads_per_month_enterprise: 150,
-          leads_per_month_smb: 150,
-          max_actions_per_run_enterprise: 10,
-          max_actions_per_run_smb: 10,
-          leads_per_day_enterprise: LEAD_DAILY_HARD_CAP,
-          leads_per_day_smb: LEAD_DAILY_HARD_CAP,
-          lead_daily_cap_locked: true,
-          min_seconds_between_gmail_sends: 120,
-          auto_send_enabled: false,
-        },
-        { headers: NO_STORE_HEADERS },
-      );
+      return NextResponse.json(defaultsResponse(), { headers: NO_STORE_HEADERS });
     }
     return NextResponse.json(
       { error: res.error.message },
@@ -94,50 +132,78 @@ export async function GET() {
     );
   }
 
-  const row = res.data as
-    | {
-        enabled?: unknown;
-        leads_per_month?: unknown;
-        max_actions_per_run?: unknown;
-        leads_per_month_enterprise?: unknown;
-        leads_per_month_smb?: unknown;
-        max_actions_per_run_enterprise?: unknown;
-        max_actions_per_run_smb?: unknown;
-        leads_per_day_enterprise?: unknown;
-        leads_per_day_smb?: unknown;
-        min_seconds_between_gmail_sends?: unknown;
-        auto_send_enabled?: unknown;
-      }
-    | null;
+  const row = (res.data ?? {}) as Record<string, unknown>;
+  const def = defaultsResponse();
+
+  const num = (k: string, d: number): number =>
+    typeof row[k] === "number" && Number.isFinite(row[k] as number) ? (row[k] as number) : d;
+  const arr = (k: string, d: string[]): string[] => {
+    const v = row[k];
+    if (!Array.isArray(v)) return d;
+    const out: string[] = [];
+    for (const x of v) if (typeof x === "string" && x.trim()) out.push(x.trim());
+    return out.length > 0 ? out : d;
+  };
+  const bool = (k: string, d: boolean): boolean =>
+    typeof row[k] === "boolean" ? (row[k] as boolean) : d;
 
   return NextResponse.json(
     {
-      enabled: row?.enabled === false ? false : true,
-      leads_per_month:
-        typeof row?.leads_per_month === "number" ? row.leads_per_month : 150,
-      max_actions_per_run:
-        typeof row?.max_actions_per_run === "number" ? row.max_actions_per_run : 10,
-      leads_per_month_enterprise:
-        typeof row?.leads_per_month_enterprise === "number"
-          ? row.leads_per_month_enterprise
-          : 150,
-      leads_per_month_smb:
-        typeof row?.leads_per_month_smb === "number" ? row.leads_per_month_smb : 150,
-      max_actions_per_run_enterprise:
-        typeof row?.max_actions_per_run_enterprise === "number"
-          ? row.max_actions_per_run_enterprise
-          : 10,
-      max_actions_per_run_smb:
-        typeof row?.max_actions_per_run_smb === "number" ? row.max_actions_per_run_smb : 10,
-      // Tages-Cap ist im Code als Konstante hart fixiert (DSGVO/UWG).
-      leads_per_day_enterprise: LEAD_DAILY_HARD_CAP,
-      leads_per_day_smb: LEAD_DAILY_HARD_CAP,
-      lead_daily_cap_locked: true,
-      min_seconds_between_gmail_sends:
-        typeof row?.min_seconds_between_gmail_sends === "number"
-          ? row.min_seconds_between_gmail_sends
-          : 120,
-      auto_send_enabled: row?.auto_send_enabled === true,
+      enabled: row.enabled === false ? false : true,
+      leads_per_month: num("leads_per_month", def.leads_per_month),
+      max_actions_per_run: num("max_actions_per_run", def.max_actions_per_run),
+      leads_per_month_enterprise: num("leads_per_month_enterprise", def.leads_per_month_enterprise),
+      leads_per_month_smb: num("leads_per_month_smb", def.leads_per_month_smb),
+      max_actions_per_run_enterprise: num(
+        "max_actions_per_run_enterprise",
+        def.max_actions_per_run_enterprise,
+      ),
+      max_actions_per_run_smb: num("max_actions_per_run_smb", def.max_actions_per_run_smb),
+      leads_per_day_enterprise: clampInt(
+        num("leads_per_day_enterprise", def.leads_per_day_enterprise),
+        0,
+        LEAD_DAILY_HARD_CAP,
+      ),
+      leads_per_day_smb: clampInt(
+        num("leads_per_day_smb", def.leads_per_day_smb),
+        0,
+        LEAD_DAILY_HARD_CAP,
+      ),
+      leads_per_day_hard_cap: LEAD_DAILY_HARD_CAP,
+      min_seconds_between_gmail_sends: num(
+        "min_seconds_between_gmail_sends",
+        def.min_seconds_between_gmail_sends,
+      ),
+      auto_send_enabled: bool("auto_send_enabled", def.auto_send_enabled),
+      apollo_enabled: bool("apollo_enabled", def.apollo_enabled),
+      apollo_leads_per_day_enterprise: num(
+        "apollo_leads_per_day_enterprise",
+        def.apollo_leads_per_day_enterprise,
+      ),
+      apollo_leads_per_day_smb: num("apollo_leads_per_day_smb", def.apollo_leads_per_day_smb),
+      apollo_person_titles_enterprise: arr(
+        "apollo_person_titles_enterprise",
+        def.apollo_person_titles_enterprise,
+      ),
+      apollo_person_titles_smb: arr("apollo_person_titles_smb", def.apollo_person_titles_smb),
+      apollo_person_locations: arr("apollo_person_locations", def.apollo_person_locations),
+      apollo_person_seniorities: arr("apollo_person_seniorities", def.apollo_person_seniorities),
+      apollo_org_employee_min: num("apollo_org_employee_min", def.apollo_org_employee_min),
+      apollo_org_employee_max: num("apollo_org_employee_max", def.apollo_org_employee_max),
+      apollo_org_employee_min_smb: num(
+        "apollo_org_employee_min_smb",
+        def.apollo_org_employee_min_smb,
+      ),
+      apollo_org_employee_max_smb: num(
+        "apollo_org_employee_max_smb",
+        def.apollo_org_employee_max_smb,
+      ),
+      apollo_industries: arr("apollo_industries", def.apollo_industries),
+      apollo_industries_smb: arr("apollo_industries_smb", def.apollo_industries_smb),
+      apollo_reveal_personal_emails: bool(
+        "apollo_reveal_personal_emails",
+        def.apollo_reveal_personal_emails,
+      ),
     },
     { headers: NO_STORE_HEADERS },
   );
@@ -146,102 +212,66 @@ export async function GET() {
 export async function PATCH(request: NextRequest) {
   const ctx = await requireAdminMutationContext();
   if (!ctx.ok) {
-    return NextResponse.json({ error: ctx.error }, { status: ctx.status, headers: NO_STORE_HEADERS });
+    return NextResponse.json(
+      { error: ctx.error },
+      { status: ctx.status, headers: NO_STORE_HEADERS },
+    );
   }
 
-  let body: {
-    enabled?: unknown;
-    leads_per_month?: unknown;
-    max_actions_per_run?: unknown;
-    leads_per_month_enterprise?: unknown;
-    leads_per_month_smb?: unknown;
-    max_actions_per_run_enterprise?: unknown;
-    max_actions_per_run_smb?: unknown;
-    leads_per_day_enterprise?: unknown;
-    leads_per_day_smb?: unknown;
-    min_seconds_between_gmail_sends?: unknown;
-    auto_send_enabled?: unknown;
-  };
+  let body: Record<string, unknown>;
   try {
-    body = (await request.json()) as typeof body;
+    body = (await request.json()) as Record<string, unknown>;
   } catch {
-    return NextResponse.json({ error: "Ungültiger Body." }, { status: 400, headers: NO_STORE_HEADERS });
+    return NextResponse.json(
+      { error: "Ungültiger Body." },
+      { status: 400, headers: NO_STORE_HEADERS },
+    );
   }
-
-  const enabled = typeof body.enabled === "boolean" ? body.enabled : undefined;
-  const autoSendEnabled =
-    typeof body.auto_send_enabled === "boolean" ? body.auto_send_enabled : undefined;
-  const leads =
-    typeof body.leads_per_month === "number"
-      ? body.leads_per_month
-      : typeof body.leads_per_month === "string"
-        ? Number(body.leads_per_month)
-        : undefined;
-  const maxPerRun =
-    typeof body.max_actions_per_run === "number"
-      ? body.max_actions_per_run
-      : typeof body.max_actions_per_run === "string"
-        ? Number(body.max_actions_per_run)
-        : undefined;
-
-  const leadsEnterprise =
-    typeof body.leads_per_month_enterprise === "number"
-      ? body.leads_per_month_enterprise
-      : typeof body.leads_per_month_enterprise === "string"
-        ? Number(body.leads_per_month_enterprise)
-        : undefined;
-  const leadsSmb =
-    typeof body.leads_per_month_smb === "number"
-      ? body.leads_per_month_smb
-      : typeof body.leads_per_month_smb === "string"
-        ? Number(body.leads_per_month_smb)
-        : undefined;
-  const maxPerRunEnterprise =
-    typeof body.max_actions_per_run_enterprise === "number"
-      ? body.max_actions_per_run_enterprise
-      : typeof body.max_actions_per_run_enterprise === "string"
-        ? Number(body.max_actions_per_run_enterprise)
-        : undefined;
-  const maxPerRunSmb =
-    typeof body.max_actions_per_run_smb === "number"
-      ? body.max_actions_per_run_smb
-      : typeof body.max_actions_per_run_smb === "string"
-        ? Number(body.max_actions_per_run_smb)
-        : undefined;
-
-  // HARD-CAP: leads_per_day_* werden vom Endpoint ignoriert.
-  // Der Tages-Cap ist im Code als LEAD_DAILY_HARD_CAP = 5 fixiert (DSGVO/UWG).
-  const leadsDayClientAttempt =
-    body.leads_per_day_enterprise !== undefined ||
-    body.leads_per_day_smb !== undefined;
-  const minGmailGap =
-    typeof body.min_seconds_between_gmail_sends === "number"
-      ? body.min_seconds_between_gmail_sends
-      : typeof body.min_seconds_between_gmail_sends === "string"
-        ? Number(body.min_seconds_between_gmail_sends)
-        : undefined;
 
   const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
-  if (enabled !== undefined) update.enabled = enabled;
-  if (leads !== undefined) update.leads_per_month = clampInt(leads, 1, 2000);
-  if (maxPerRun !== undefined) update.max_actions_per_run = clampInt(maxPerRun, 1, 50);
-  if (leadsEnterprise !== undefined)
-    update.leads_per_month_enterprise = clampInt(leadsEnterprise, 1, 2000);
-  if (leadsSmb !== undefined) update.leads_per_month_smb = clampInt(leadsSmb, 1, 2000);
-  if (maxPerRunEnterprise !== undefined)
-    update.max_actions_per_run_enterprise = clampInt(maxPerRunEnterprise, 1, 50);
-  if (maxPerRunSmb !== undefined)
-    update.max_actions_per_run_smb = clampInt(maxPerRunSmb, 1, 50);
-  // leads_per_day_* NICHT uebernehmen (Hard-Cap im Code).
-  // Optional: DB-Werte aktiv auf LEAD_DAILY_HARD_CAP zuruecksetzen, falls ein Schreibzugriff kam.
-  if (leadsDayClientAttempt) {
-    update.leads_per_day_enterprise = LEAD_DAILY_HARD_CAP;
-    update.leads_per_day_smb = LEAD_DAILY_HARD_CAP;
-    update.lead_daily_cap_locked = true;
-  }
-  if (minGmailGap !== undefined)
-    update.min_seconds_between_gmail_sends = clampInt(minGmailGap, 30, 3600);
-  if (autoSendEnabled !== undefined) update.auto_send_enabled = autoSendEnabled;
+
+  const setNum = (k: string, min: number, max: number) => {
+    const v = body[k];
+    if (typeof v === "number" || (typeof v === "string" && v.trim())) {
+      const n = typeof v === "number" ? v : Number(v);
+      if (Number.isFinite(n)) update[k] = clampInt(n, min, max);
+    }
+  };
+  const setBool = (k: string) => {
+    if (typeof body[k] === "boolean") update[k] = body[k];
+  };
+  const setArr = (k: string) => {
+    const a = asStringArray(body[k]);
+    if (a !== undefined) update[k] = a;
+  };
+
+  setBool("enabled");
+  setBool("auto_send_enabled");
+  setNum("leads_per_month", 1, 5000);
+  setNum("max_actions_per_run", 1, 50);
+  setNum("leads_per_month_enterprise", 1, 5000);
+  setNum("leads_per_month_smb", 1, 5000);
+  setNum("max_actions_per_run_enterprise", 1, 50);
+  setNum("max_actions_per_run_smb", 1, 50);
+  setNum("leads_per_day_enterprise", 0, LEAD_DAILY_HARD_CAP);
+  setNum("leads_per_day_smb", 0, LEAD_DAILY_HARD_CAP);
+  setNum("min_seconds_between_gmail_sends", 30, 3600);
+
+  // Apollo-Spalten
+  setBool("apollo_enabled");
+  setNum("apollo_leads_per_day_enterprise", 0, LEAD_DAILY_HARD_CAP);
+  setNum("apollo_leads_per_day_smb", 0, LEAD_DAILY_HARD_CAP);
+  setArr("apollo_person_titles_enterprise");
+  setArr("apollo_person_titles_smb");
+  setArr("apollo_person_locations");
+  setArr("apollo_person_seniorities");
+  setNum("apollo_org_employee_min", 1, 1_000_000);
+  setNum("apollo_org_employee_max", 1, 1_000_000);
+  setNum("apollo_org_employee_min_smb", 1, 1_000_000);
+  setNum("apollo_org_employee_max_smb", 1, 1_000_000);
+  setArr("apollo_industries");
+  setArr("apollo_industries_smb");
+  setBool("apollo_reveal_personal_emails");
 
   if (Object.keys(update).length <= 1) {
     return NextResponse.json(
@@ -250,7 +280,6 @@ export async function PATCH(request: NextRequest) {
     );
   }
 
-  // Upsert via insert-on-empty (einfach, non-destruktiv).
   const existing = await ctx.service
     .from("leadmaschine_settings")
     .select("id")
@@ -280,6 +309,29 @@ export async function PATCH(request: NextRequest) {
       .update(update)
       .eq("id", existing.data.id);
     if (upd.error) {
+      // Falls Apollo-Spalten noch nicht migriert sind: Apollo-Felder droppen, retry.
+      const m = upd.error.message.toLowerCase();
+      if (m.includes("column") && APOLLO_COLUMNS.some((c) => m.includes(c))) {
+        for (const c of APOLLO_COLUMNS) delete update[c];
+        const retry = await ctx.service
+          .from("leadmaschine_settings")
+          .update(update)
+          .eq("id", existing.data.id);
+        if (retry.error) {
+          return NextResponse.json(
+            { error: retry.error.message },
+            { status: 500, headers: NO_STORE_HEADERS },
+          );
+        }
+        return NextResponse.json(
+          {
+            ok: true,
+            warning:
+              "Apollo-Spalten fehlen in der DB. Bitte Migration 20260505180000_leadmaschine_apollo_pivot.sql ausführen.",
+          },
+          { headers: NO_STORE_HEADERS },
+        );
+      }
       return NextResponse.json(
         { error: upd.error.message },
         { status: 500, headers: NO_STORE_HEADERS },
@@ -294,11 +346,13 @@ export async function PATCH(request: NextRequest) {
             ? "Leadmaschine-Settings-Tabelle fehlt. Bitte Supabase-Migration ausführen."
             : ins.error.message,
         },
-        { status: isTableMissingError(ins.error.message) ? 503 : 500, headers: NO_STORE_HEADERS },
+        {
+          status: isTableMissingError(ins.error.message) ? 503 : 500,
+          headers: NO_STORE_HEADERS,
+        },
       );
     }
   }
 
   return NextResponse.json({ ok: true }, { headers: NO_STORE_HEADERS });
 }
-

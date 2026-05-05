@@ -10,6 +10,10 @@
       "schedule": "0 1 * * 0"
     },
     {
+      "path": "/api/cron/leadmaschine-discover",
+      "schedule": "30 6 * * 1-5"
+    },
+    {
       "path": "/api/cron/leadmaschine",
       "schedule": "0 7 * * 1-5"
     },

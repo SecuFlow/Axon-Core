@@ -229,6 +229,7 @@ export function LeadmaschineClient() {
     max_actions_per_run_smb: number;
     leads_per_day_enterprise: number;
     leads_per_day_smb: number;
+    leads_per_day_hard_cap: number;
     min_seconds_between_gmail_sends: number;
     auto_send_enabled: boolean;
   } | null>(null);
@@ -450,49 +451,39 @@ export function LeadmaschineClient() {
         max_actions_per_run_smb?: number;
         leads_per_day_enterprise?: number;
         leads_per_day_smb?: number;
+        leads_per_day_hard_cap?: number;
         min_seconds_between_gmail_sends?: number;
         auto_send_enabled?: boolean;
       };
+      const hardCap =
+        typeof p.leads_per_day_hard_cap === "number" ? p.leads_per_day_hard_cap : 30;
       const entDay =
         typeof p.leads_per_day_enterprise === "number"
           ? p.leads_per_day_enterprise
-          : Math.max(
-              1,
-              Math.round(
-                (typeof p.leads_per_month_enterprise === "number"
-                  ? p.leads_per_month_enterprise
-                  : 100) / 30,
-              ),
-            );
+          : 20;
       const smbDay =
-        typeof p.leads_per_day_smb === "number"
-          ? p.leads_per_day_smb
-          : Math.max(
-              1,
-              Math.round(
-                (typeof p.leads_per_month_smb === "number" ? p.leads_per_month_smb : 40) / 30,
-              ),
-            );
+        typeof p.leads_per_day_smb === "number" ? p.leads_per_day_smb : 10;
       setSettings({
         enabled: p.enabled !== false,
         leads_per_month:
-          typeof p.leads_per_month === "number" ? p.leads_per_month : 100,
+          typeof p.leads_per_month === "number" ? p.leads_per_month : 600,
         max_actions_per_run:
-          typeof p.max_actions_per_run === "number" ? p.max_actions_per_run : 5,
+          typeof p.max_actions_per_run === "number" ? p.max_actions_per_run : 10,
         leads_per_month_enterprise:
           typeof p.leads_per_month_enterprise === "number"
             ? p.leads_per_month_enterprise
-            : 100,
+            : 600,
         leads_per_month_smb:
-          typeof p.leads_per_month_smb === "number" ? p.leads_per_month_smb : 40,
+          typeof p.leads_per_month_smb === "number" ? p.leads_per_month_smb : 300,
         max_actions_per_run_enterprise:
           typeof p.max_actions_per_run_enterprise === "number"
             ? p.max_actions_per_run_enterprise
-            : 5,
+            : 10,
         max_actions_per_run_smb:
-          typeof p.max_actions_per_run_smb === "number" ? p.max_actions_per_run_smb : 5,
+          typeof p.max_actions_per_run_smb === "number" ? p.max_actions_per_run_smb : 10,
         leads_per_day_enterprise: entDay,
         leads_per_day_smb: smbDay,
+        leads_per_day_hard_cap: hardCap,
         min_seconds_between_gmail_sends:
           typeof p.min_seconds_between_gmail_sends === "number"
             ? p.min_seconds_between_gmail_sends
@@ -502,14 +493,15 @@ export function LeadmaschineClient() {
     } catch {
       setSettings({
         enabled: true,
-        leads_per_month: 100,
-        max_actions_per_run: 5,
-        leads_per_month_enterprise: 100,
-        leads_per_month_smb: 40,
-        max_actions_per_run_enterprise: 5,
-        max_actions_per_run_smb: 5,
-        leads_per_day_enterprise: 4,
-        leads_per_day_smb: 2,
+        leads_per_month: 600,
+        max_actions_per_run: 10,
+        leads_per_month_enterprise: 600,
+        leads_per_month_smb: 300,
+        max_actions_per_run_enterprise: 10,
+        max_actions_per_run_smb: 10,
+        leads_per_day_enterprise: 20,
+        leads_per_day_smb: 10,
+        leads_per_day_hard_cap: 30,
         min_seconds_between_gmail_sends: 120,
         auto_send_enabled: false,
       });
@@ -530,6 +522,7 @@ export function LeadmaschineClient() {
     max_actions_per_run_smb: number;
     leads_per_day_enterprise: number;
     leads_per_day_smb: number;
+    leads_per_day_hard_cap: number;
     min_seconds_between_gmail_sends: number;
     auto_send_enabled: boolean;
   }) => {
@@ -543,7 +536,6 @@ export function LeadmaschineClient() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           enabled: next.enabled,
-          // leads_per_day_* wird serverseitig ignoriert (Hard-Cap im Code).
           min_seconds_between_gmail_sends: next.min_seconds_between_gmail_sends,
           leads_per_month: next.leads_per_month,
           max_actions_per_run: next.max_actions_per_run,
@@ -551,6 +543,8 @@ export function LeadmaschineClient() {
           leads_per_month_smb: next.leads_per_month_smb,
           max_actions_per_run_enterprise: next.max_actions_per_run_enterprise,
           max_actions_per_run_smb: next.max_actions_per_run_smb,
+          leads_per_day_enterprise: next.leads_per_day_enterprise,
+          leads_per_day_smb: next.leads_per_day_smb,
           auto_send_enabled: next.auto_send_enabled,
         }),
       });
@@ -1255,18 +1249,55 @@ export function LeadmaschineClient() {
 
             <div className="rounded-md border border-[#c9a962]/25 bg-[#c9a962]/[0.04] p-4">
               <p className="font-mono text-[9px] font-medium uppercase tracking-[0.16em] text-[#d4c896]">
-                Neue Kontakte / Tag (Mail 1)
+                Neue Kontakte / Tag (Mail 1) · {segmentTab === "enterprise" ? "Enterprise" : "SMB"}
               </p>
               <p className="mt-1 font-mono text-[8px] leading-relaxed text-[#8a8a8a]">
-                DSGVO / UWG §7 Hard-Cap. Im Code fixiert, nicht editierbar.
+                Editierbar. Hard-Cap (Code-seitig) liegt bei {settings.leads_per_day_hard_cap}/Tag/Segment.
                 Follow-Ups (Tag 3) und Demos (Tag 5) zählen NICHT gegen diesen Cap.
               </p>
-              <div className="mt-3 flex items-baseline gap-2">
-                <span className="font-mono text-[28px] font-semibold text-[#e4d3a0]">5</span>
-                <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-[#8a8a8a]">
-                  / Tag fix
-                </span>
-              </div>
+              <input
+                type="number"
+                min={0}
+                max={settings.leads_per_day_hard_cap}
+                value={
+                  segmentTab === "enterprise"
+                    ? settings.leads_per_day_enterprise
+                    : settings.leads_per_day_smb
+                }
+                disabled={settingsBusy}
+                onChange={(e) =>
+                  setSettings((s) =>
+                    s
+                      ? {
+                          ...s,
+                          leads_per_day_enterprise:
+                            segmentTab === "enterprise"
+                              ? Math.max(
+                                  0,
+                                  Math.min(s.leads_per_day_hard_cap, Number(e.target.value || 0)),
+                                )
+                              : s.leads_per_day_enterprise,
+                          leads_per_day_smb:
+                            segmentTab === "smb"
+                              ? Math.max(
+                                  0,
+                                  Math.min(s.leads_per_day_hard_cap, Number(e.target.value || 0)),
+                                )
+                              : s.leads_per_day_smb,
+                        }
+                      : s,
+                  )
+                }
+                className="mt-3 w-full rounded-md border border-[#262626] bg-[#0a0a0a] px-3 py-2 font-mono text-[28px] font-semibold text-[#e4d3a0] outline-none focus:border-[#c9a962]/40"
+              />
+              <button
+                type="button"
+                disabled={settingsBusy || !settings}
+                onClick={() => settings && void saveSettings(settings)}
+                className="mt-3 inline-flex w-full items-center justify-center rounded-md border border-[#c9a962]/45 bg-[#c9a962]/[0.08] px-3 py-2 font-mono text-[10px] uppercase tracking-[0.14em] text-[#d4c896] transition hover:bg-[#c9a962]/[0.14] disabled:opacity-50"
+              >
+                Tages-Cap speichern
+              </button>
               <p className="mt-2 font-mono text-[8px] leading-relaxed text-[#6a6a6a]">
                 Ablauf pro Lead: Tag 1 Erstkontakt → Tag 3 Follow-Up → Tag 5 Demo-Einladung.
               </p>
