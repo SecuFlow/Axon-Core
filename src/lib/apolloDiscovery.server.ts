@@ -582,28 +582,15 @@ export async function runApolloDiscoveryForSegment(input: {
   }
 
   // Pre-Filter Stufe 1 (frei, keine Credits):
-  //   - has_email=true (sonst lohnt sich Enrichment nicht)
-  //   - industry vorhanden und NICHT in blacklist
-  // Das spart 20-40% Credits, weil offensichtliche Disqualifikationen schon
-  // hier rausfallen (z.B. Marketing-Agenturen, IT-Beratungen).
-  const blacklistNorm = settings.apollo_blacklist_industries.map((b) =>
-    b.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9 ]+/g, "").replace(/\s+/g, " ").trim(),
-  );
-  const candidatesAll = searchResp.people.filter((p) => {
-    if (p.has_email !== true) return false;
-    const ind = (p.organization?.industry ?? "").toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9 ]+/g, "").replace(/\s+/g, " ").trim();
-    if (!ind) return false;
-    for (const b of blacklistNorm) {
-      if (b && ind.includes(b)) return false;
-    }
-    return true;
-  });
+  // Apollo's Search-Endpoint gibt organization.industry leider als `null`
+  // zurueck (auch wenn has_industry=true). Die Industry kommt erst im
+  // bulk_match. Daher hier nur has_email pruefen, der echte Industry-Filter
+  // (Echtheits-Check + LLM) laeuft NACH dem Enrichment.
+  const candidatesAll = searchResp.people.filter((p) => p.has_email === true);
   // Buffer fuer Bulk-Match: bis zu 4x targetCount, capped at 100.
   const candidates = candidatesAll.slice(0, Math.min(100, targetCount * 4));
   baseResult.searched_count = searchResp.people.length;
-  // Differenz searched -> candidates landet als skipped_authenticity gezaehlt
-  // (Stufe 1 = Pre-Filter; gilt als Echtheits-Stufe, nicht als duplicate).
-  baseResult.skipped_authenticity_count += searchResp.people.length - candidatesAll.length;
+  baseResult.skipped_no_email_count += searchResp.people.length - candidatesAll.length;
 
   // Existierende apollo_person_ids einmal vorab holen, um Duplikate zu sparen.
   const candidateIds = candidates.map((c) => c.id);
