@@ -4,6 +4,7 @@ import { isRealCompanyOption } from "@/lib/filterRealCompanies";
 import { requireKonzernTenantContext } from "@/lib/konzernTenantContext";
 import { resolveActorMandantId } from "@/lib/mandantScope";
 import { logEvent } from "@/lib/auditLog";
+import { PRIVATE_SWR_HEADERS } from "@/lib/httpCache";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -76,20 +77,63 @@ export async function GET() {
   }
 
   const { service } = ctx;
-  const actorMandantId = ctx.isAdmin
-    ? null
-    : await resolveActorMandantId(service, ctx.userId);
+
+  // ---------------------------------------------------------------------------
+  // Phase 1: alle unabhängigen Reads parallel anschieben.
+  // Vorher: 6 sequenzielle awaits (~6× Round-Trip-Latenz).
+  // Jetzt: 1× Promise.all (max(latenz) statt sum(latenz)).
+  // ---------------------------------------------------------------------------
+  const [
+    actorMandantId,
+    profRowsRes,
+    meProfileRes,
+    myCompanyRes,
+    authListRes,
+    compRowsRes,
+    companyPickRes,
+  ] = await Promise.all([
+    ctx.isAdmin ? Promise.resolve<string | null>(null) : resolveActorMandantId(service, ctx.userId),
+    service
+      .from("profiles")
+      .select("id, role, company_id, tenant_id, mandant_id, location_id"),
+    ctx.isAdmin
+      ? Promise.resolve({ data: null, error: null })
+      : service
+          .from("profiles")
+          .select("company_id")
+          .eq("id", ctx.userId)
+          .maybeSingle(),
+    ctx.isAdmin
+      ? Promise.resolve({ data: null, error: null })
+      : service
+          .from("companies")
+          .select("id")
+          .eq("user_id", ctx.userId)
+          .limit(1)
+          .maybeSingle(),
+    service.auth.admin.listUsers({ page: 1, perPage: 1000 }),
+    service.from("companies").select("user_id, role, tenant_id, is_subscribed, name"),
+    service
+      .from("companies")
+      .select("id, name, tenant_id")
+      .order("name", { ascending: true }),
+  ]);
+
   if (!ctx.isAdmin && !actorMandantId) {
     return NextResponse.json({ error: "Kein Mandanten-Kontext." }, { status: 403 });
   }
 
-  const { data: profRows, error: pErr } = await service
-    .from("profiles")
-    .select("id, role, company_id, tenant_id, mandant_id, location_id");
-
-  if (pErr) {
-    return NextResponse.json({ error: pErr.message }, { status: 500 });
+  if (profRowsRes.error) {
+    return NextResponse.json({ error: profRowsRes.error.message }, { status: 500 });
   }
+  if (authListRes.error) {
+    return NextResponse.json({ error: authListRes.error.message }, { status: 500 });
+  }
+
+  const profRows = profRowsRes.data;
+  const listData = authListRes.data;
+  const compRows = compRowsRes.data;
+  const companyPick = companyPickRes.data;
 
   const profileById = new Map<
     string,
@@ -124,38 +168,16 @@ export async function GET() {
 
   let managerCompanyId: string | null = null;
   if (!ctx.isAdmin) {
-    const { data: meProf } = await service
-      .from("profiles")
-      .select("company_id")
-      .eq("id", ctx.userId)
-      .maybeSingle();
-    const mc = (meProf as { company_id?: string | null } | null)?.company_id;
+    const mc = (meProfileRes.data as { company_id?: string | null } | null)?.company_id;
     if (typeof mc === "string" && mc.length > 0) {
       managerCompanyId = mc;
     } else {
-      const { data: myCo } = await service
-        .from("companies")
-        .select("id")
-        .eq("user_id", ctx.userId)
-        .limit(1)
-        .maybeSingle();
-      const coId = (myCo as { id?: string } | null)?.id;
+      const coId = (myCompanyRes.data as { id?: string } | null)?.id;
       if (typeof coId === "string" && coId.length > 0) {
         managerCompanyId = coId;
       }
     }
   }
-
-  const { data: listData, error: listError } =
-    await service.auth.admin.listUsers({ page: 1, perPage: 1000 });
-
-  if (listError) {
-    return NextResponse.json({ error: listError.message }, { status: 500 });
-  }
-
-  const { data: compRows } = await service
-    .from("companies")
-    .select("user_id, role, tenant_id, is_subscribed, name");
 
   const companyByUser = new Map<string, string>();
   const subscribedByUser = new Map<string, boolean>();
@@ -175,11 +197,6 @@ export async function GET() {
       typeof r.name === "string" ? r.name : null,
     );
   }
-
-  const { data: companyPick } = await service
-    .from("companies")
-    .select("id, name, tenant_id")
-    .order("name", { ascending: true });
 
   const companyOptionsFull =
     (companyPick ?? [])
@@ -226,28 +243,34 @@ export async function GET() {
   for (const [, pr] of profileById) {
     if (pr.company_id) companyPkSet.add(pr.company_id);
   }
+
+  // Phase 2: tenant-Lookup pro Company-PK + Locations parallel ziehen.
+  const [tenantsByPkRes, locsRes] = await Promise.all([
+    companyPkSet.size > 0
+      ? service
+          .from("companies")
+          .select("id, tenant_id")
+          .in("id", [...companyPkSet])
+      : Promise.resolve({ data: [] as Array<{ id: string; tenant_id: string | null }>, error: null }),
+    service
+      .from("locations")
+      .select("id, name, company_id")
+      .order("name", { ascending: true }),
+  ]);
+
   const tenantByCompanyPk = new Map<string, string>();
-  if (companyPkSet.size > 0) {
-    const { data: tRows } = await service
-      .from("companies")
-      .select("id, tenant_id")
-      .in("id", [...companyPkSet]);
-    for (const tr of tRows ?? []) {
-      const r = tr as { id?: string; tenant_id?: string | null };
-      if (
-        typeof r.id === "string" &&
-        typeof r.tenant_id === "string" &&
-        r.tenant_id.length > 0
-      ) {
-        tenantByCompanyPk.set(r.id, r.tenant_id);
-      }
+  for (const tr of tenantsByPkRes.data ?? []) {
+    const r = tr as { id?: string; tenant_id?: string | null };
+    if (
+      typeof r.id === "string" &&
+      typeof r.tenant_id === "string" &&
+      r.tenant_id.length > 0
+    ) {
+      tenantByCompanyPk.set(r.id, r.tenant_id);
     }
   }
 
-  const { data: locRows } = await service
-    .from("locations")
-    .select("id, name, company_id")
-    .order("name", { ascending: true });
+  const locRows = locsRes.data;
 
   const locRowsAll = (locRows ?? []) as Array<{
     id: string;
@@ -364,29 +387,32 @@ export async function GET() {
     })
     .filter(Boolean);
 
-  return NextResponse.json({
-    actorId: ctx.userId,
-    viewer: {
-      isAdmin: ctx.isAdmin,
-      isManagerScope: !ctx.isAdmin && ctx.tenantId != null,
-      canAssignCompany: ctx.isAdmin,
-      canAssignLocation: true,
-      canChangeRole: true,
+  return NextResponse.json(
+    {
+      actorId: ctx.userId,
+      viewer: {
+        isAdmin: ctx.isAdmin,
+        isManagerScope: !ctx.isAdmin && ctx.tenantId != null,
+        canAssignCompany: ctx.isAdmin,
+        canAssignLocation: true,
+        canChangeRole: true,
+      },
+      companyOptions: ctx.isAdmin
+        ? companyOptionsFiltered.map(({ id, name, tenantId }) => ({
+            id,
+            name,
+            tenantId,
+          }))
+        : [],
+      locations: locations.map((l) => ({
+        id: l.id,
+        name: l.name,
+        tenantId: l.company_id,
+      })),
+      users,
     },
-    companyOptions: ctx.isAdmin
-      ? companyOptionsFiltered.map(({ id, name, tenantId }) => ({
-          id,
-          name,
-          tenantId,
-        }))
-      : [],
-    locations: locations.map((l) => ({
-      id: l.id,
-      name: l.name,
-      tenantId: l.company_id,
-    })),
-    users,
-  });
+    { headers: PRIVATE_SWR_HEADERS },
+  );
 }
 
 /**
@@ -459,22 +485,38 @@ export async function POST(req: Request) {
   const userId = created.data.user.id;
   const now = new Date().toISOString();
 
-  // Profile binden (tenant + company_id + worker-role + Passwortwechsel erzwingen).
+  // Profile binden (tenant + mandant + company_id + worker-role + Passwortwechsel erzwingen).
+  // mandant_id ist seit Migration 20260415213000 NOT NULL und muss auf einer
+  // migrierten DB explizit gesetzt werden — sonst schlägt der Insert fehl.
   const profileBase: Record<string, unknown> = {
     id: userId,
     company_id: ctx.isAdmin ? null : managerCompanyId,
     tenant_id: tenantId,
+    mandant_id: tenantId,
     location_id: locationId,
     role: "user",
     must_change_password: true,
     updated_at: now,
   };
 
-  let up = await ctx.service.from("profiles").upsert(profileBase, { onConflict: "id" });
+  const upsertProfile = async (payload: Record<string, unknown>) =>
+    ctx.service.from("profiles").upsert(payload, { onConflict: "id" });
+
+  let up = await upsertProfile(profileBase);
   if (up.error?.message.includes("must_change_password")) {
     const fb = { ...profileBase };
     delete fb.must_change_password;
-    up = await ctx.service.from("profiles").upsert(fb, { onConflict: "id" });
+    up = await upsertProfile(fb);
+  }
+  if (up.error?.message.includes("mandant_id")) {
+    // Legacy-DB ohne mandant_id-Spalte: graceful fallback auf tenant_id-only.
+    const fb = { ...profileBase };
+    delete fb.mandant_id;
+    up = await upsertProfile(fb);
+    if (up.error?.message.includes("must_change_password")) {
+      delete fb.must_change_password;
+      up = await upsertProfile(fb);
+    }
   }
 
   if (up.error) {

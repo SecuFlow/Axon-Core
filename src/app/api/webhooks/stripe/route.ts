@@ -138,6 +138,81 @@ async function provisionManagerForMandate(
 }
 
 /**
+ * Idempotency-Guard:
+ * - Versucht ein INSERT auf stripe_events (PK = event.id).
+ * - Erfolg → wir verarbeiten den Event genau einmal.
+ * - Unique-Violation oder bereits abgeschlossener Eintrag → idempotenter Skip.
+ * - Fallback: wenn die Tabelle (noch) nicht existiert, wird ohne Idempotency
+ *   gearbeitet, damit der Webhook während ausstehender Migration nicht hart bricht.
+ */
+async function claimStripeEvent(
+  service: SupabaseClient,
+  event: Stripe.Event,
+): Promise<
+  | { ok: true; tableMissing: boolean }
+  | { ok: false; idempotent: true; status: string }
+> {
+  const insert = await service
+    .from("stripe_events")
+    .insert({
+      event_id: event.id,
+      event_type: event.type,
+      status: "processing",
+    });
+
+  if (!insert.error) {
+    return { ok: true, tableMissing: false };
+  }
+
+  const msg = insert.error.message?.toLowerCase() ?? "";
+  if (msg.includes("stripe_events") && msg.includes("does not exist")) {
+    console.warn(
+      "[stripe webhook] stripe_events Tabelle fehlt — Migration ausstehend; verarbeite ohne Idempotency-Sperre.",
+    );
+    return { ok: true, tableMissing: true };
+  }
+
+  if (msg.includes("duplicate") || msg.includes("unique")) {
+    const existing = await service
+      .from("stripe_events")
+      .select("status")
+      .eq("event_id", event.id)
+      .maybeSingle();
+    const status =
+      (existing.data as { status?: string } | null)?.status ?? "processing";
+    return { ok: false, idempotent: true, status };
+  }
+
+  // Anderer DB-Fehler beim Insert: nicht idempotent skipen, sondern verarbeiten,
+  // damit der Webhook eine sinnvolle Antwort an Stripe geben kann.
+  console.warn("[stripe webhook] stripe_events insert fehlgeschlagen:", insert.error.message);
+  return { ok: true, tableMissing: false };
+}
+
+async function markStripeEvent(
+  service: SupabaseClient,
+  eventId: string,
+  status: "completed" | "failed",
+  errorText?: string,
+): Promise<void> {
+  const patch: Record<string, unknown> = {
+    status,
+    processed_at: new Date().toISOString(),
+  };
+  if (errorText) patch.error_text = errorText.slice(0, 2000);
+  const res = await service
+    .from("stripe_events")
+    .update(patch)
+    .eq("event_id", eventId);
+  if (res.error && !res.error.message.toLowerCase().includes("does not exist")) {
+    console.warn(
+      "[stripe webhook] stripe_events status update fehlgeschlagen:",
+      res.error.message,
+    );
+  }
+}
+
+/**
  * Stripe → companies.is_subscribed per Auth-UUID in user_id.
  */
 export async function POST(req: Request) {
@@ -178,17 +253,29 @@ export async function POST(req: Request) {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
+  const claim = await claimStripeEvent(supabaseService, event);
+  if (!claim.ok) {
+    // Bereits verarbeitet (oder gerade in Bearbeitung) → idempotent OK.
+    return NextResponse.json({
+      received: true,
+      idempotent: true,
+      previous_status: claim.status,
+    });
+  }
+
   if (event.type === "checkout.session.completed") {
     const session = event.data.object as Stripe.Checkout.Session;
-    await provisionManagerForMandate(supabaseService, session);
-    const host =
-      req.headers.get("x-forwarded-host") ??
-      req.headers.get("host") ??
-      process.env.NEXT_PUBLIC_SITE_URL?.replace(/^https?:\/\//, "") ??
-      "";
-    const proto = req.headers.get("x-forwarded-proto") ?? "https";
-    const base = process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/$/, "") ?? `${proto}://${host}`;
     try {
+      await provisionManagerForMandate(supabaseService, session);
+      const host =
+        req.headers.get("x-forwarded-host") ??
+        req.headers.get("host") ??
+        process.env.NEXT_PUBLIC_SITE_URL?.replace(/^https?:\/\//, "") ??
+        "";
+      const proto = req.headers.get("x-forwarded-proto") ?? "https";
+      const base =
+        process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/$/, "") ??
+        `${proto}://${host}`;
       await runPostPaymentSetup({
         service: supabaseService,
         session,
@@ -196,10 +283,10 @@ export async function POST(req: Request) {
         trigger: "webhook",
       });
     } catch (setupError) {
-      console.error(
-        "[stripe webhook] post payment setup:",
-        setupError instanceof Error ? setupError.message : String(setupError),
-      );
+      const message =
+        setupError instanceof Error ? setupError.message : String(setupError);
+      console.error("[stripe webhook] post payment setup:", message);
+      await markStripeEvent(supabaseService, event.id, "failed", message);
       return NextResponse.json(
         { error: "Post-Payment Setup fehlgeschlagen." },
         { status: 500 },
@@ -207,5 +294,6 @@ export async function POST(req: Request) {
     }
   }
 
+  await markStripeEvent(supabaseService, event.id, "completed");
   return NextResponse.json({ received: true });
 }

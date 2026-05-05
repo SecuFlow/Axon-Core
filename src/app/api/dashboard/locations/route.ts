@@ -5,6 +5,7 @@ import {
   resolveMandantTenantId,
 } from "@/lib/resolveMandantTenantId";
 import { requireKonzernTenantContext } from "@/lib/konzernTenantContext";
+import { PRIVATE_SWR_HEADERS } from "@/lib/httpCache";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
@@ -139,9 +140,50 @@ export async function GET(request: NextRequest) {
     ""
   ).trim();
 
-  const prof = await loadProfileCompany(ctx.service, ctx.userId);
+  // Ein einziger Profil-Read mit eingebettetem companies-Datensatz (Mandanten-Anzeige
+  // wird daraus direkt abgeleitet) statt zweier sequenzieller Queries:
+  // profiles + companies(name) in einem Round-Trip. PostgREST resolved den FK
+  // automatisch über `profiles.company_id → companies.id`.
+  const profileWithCompany = await ctx.service
+    .from("profiles")
+    .select("company_id, tenant_id, role, companies(id, name, tenant_id)")
+    .eq("id", ctx.userId)
+    .maybeSingle();
+
+  const profRaw = profileWithCompany.data as
+    | {
+        company_id?: string | null;
+        tenant_id?: string | null;
+        role?: unknown;
+        companies?:
+          | { id?: string | null; name?: string | null; tenant_id?: string | null }
+          | { id?: string | null; name?: string | null; tenant_id?: string | null }[]
+          | null;
+      }
+    | null;
+
+  const prof: Awaited<ReturnType<typeof loadProfileCompany>> = {
+    company_id:
+      typeof profRaw?.company_id === "string" && profRaw.company_id.trim().length > 0
+        ? profRaw.company_id.trim()
+        : null,
+    tenant_id:
+      typeof profRaw?.tenant_id === "string" && profRaw.tenant_id.trim().length > 0
+        ? profRaw.tenant_id.trim()
+        : null,
+    role: normalizeDbRole(profRaw?.role),
+  };
+  const embed = Array.isArray(profRaw?.companies)
+    ? profRaw?.companies[0] ?? null
+    : profRaw?.companies ?? null;
+  let mandateName: string | null =
+    typeof embed?.name === "string" && embed.name.trim() ? embed.name.trim() : null;
+  // Fallback: kein embed-Name → klassische Auflösung.
+  if (!mandateName) {
+    mandateName = await mandateCompanyDisplayName(ctx.service, prof);
+  }
+
   const profileScope = firstProfileScope(prof);
-  const mandateName = await mandateCompanyDisplayName(ctx.service, prof);
   const isProfileManager = prof.role === "manager";
   const standortMeta = {
     profile_role: prof.role,
@@ -239,6 +281,7 @@ export async function GET(request: NextRequest) {
           },
           standortMeta,
         ),
+        { headers: PRIVATE_SWR_HEADERS },
       );
     }
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -253,6 +296,7 @@ export async function GET(request: NextRequest) {
       },
       standortMeta,
     ),
+    { headers: PRIVATE_SWR_HEADERS },
   );
 }
 

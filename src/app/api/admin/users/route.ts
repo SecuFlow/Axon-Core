@@ -1,12 +1,9 @@
 import { NextResponse } from "next/server";
 import { normalizeDbRole } from "@/lib/adminAccess";
 import { requireAdminApiSession } from "@/app/admin/hq/_lib/requireAdminApiSession";
+import { NO_STORE_HEADERS, PRIVATE_SWR_HEADERS } from "@/lib/httpCache";
 
 export const dynamic = "force-dynamic";
-
-const NO_STORE_HEADERS = {
-  "Cache-Control": "private, no-store",
-} as const;
 
 export type AdminRoleUi = "mitarbeiter" | "manager" | "admin";
 
@@ -31,40 +28,37 @@ export async function GET() {
 
   const { service } = ctx;
 
-  const { data: listData, error: listError } =
-    await service.auth.admin.listUsers({
-      page: 1,
-      perPage: 500,
-    });
+  // Drei unabhängige Reads parallel: GoTrue listUsers + companies + profiles.
+  // Vorher 3× sequenzielle Latenz, jetzt max(latenz). listUsers ist davon der
+  // langsamste Call (~150–400 ms via GoTrue API), die DB-Reads laufen on-top.
+  const [authListRes, companyRowsRes, profileRowsRes] = await Promise.all([
+    service.auth.admin.listUsers({ page: 1, perPage: 500 }),
+    service.from("companies").select("user_id,name,role,is_subscribed"),
+    service.from("profiles").select("id, role, company_id"),
+  ]);
 
-  if (listError) {
+  if (authListRes.error) {
     return NextResponse.json(
-      { error: listError.message },
+      { error: authListRes.error.message },
+      { status: 500, headers: NO_STORE_HEADERS },
+    );
+  }
+  if (companyRowsRes.error) {
+    return NextResponse.json(
+      { error: companyRowsRes.error.message },
+      { status: 500, headers: NO_STORE_HEADERS },
+    );
+  }
+  if (profileRowsRes.error) {
+    return NextResponse.json(
+      { error: profileRowsRes.error.message },
       { status: 500, headers: NO_STORE_HEADERS },
     );
   }
 
-  const { data: companyRows, error: companyError } = await service
-    .from("companies")
-    .select("user_id,name,role,is_subscribed");
-
-  if (companyError) {
-    return NextResponse.json(
-      { error: companyError.message },
-      { status: 500, headers: NO_STORE_HEADERS },
-    );
-  }
-
-  const { data: profileRows, error: profileError } = await service
-    .from("profiles")
-    .select("id, role, company_id");
-
-  if (profileError) {
-    return NextResponse.json(
-      { error: profileError.message },
-      { status: 500, headers: NO_STORE_HEADERS },
-    );
-  }
+  const listData = authListRes.data;
+  const companyRows = companyRowsRes.data;
+  const profileRows = profileRowsRes.data;
 
   const profileByUser = new Map<
     string,
@@ -114,5 +108,8 @@ export async function GET() {
     } satisfies AdminUserListItem;
   });
 
-  return NextResponse.json({ users, actorId: ctx.actorId }, { headers: NO_STORE_HEADERS });
+  return NextResponse.json(
+    { users, actorId: ctx.actorId },
+    { headers: PRIVATE_SWR_HEADERS },
+  );
 }

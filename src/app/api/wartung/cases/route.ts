@@ -3,6 +3,7 @@ import { logEvent } from "@/lib/auditLog";
 import { requireKonzernTenantContext } from "@/lib/konzernTenantContext";
 import { resolveMandantTenantId } from "@/lib/resolveMandantTenantId";
 import { applyMandantFilter, resolveActorMandantId } from "@/lib/mandantScope";
+import { PRIVATE_SWR_HEADERS } from "@/lib/httpCache";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,10 +19,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: ctx.error }, { status: ctx.status });
   }
 
-  const actorMandantId = ctx.isAdmin
-    ? null
-    : await resolveActorMandantId(ctx.service, ctx.userId);
-
   const daysRaw = request.nextUrl.searchParams.get("days") ?? "10";
   const days = Math.max(1, Math.min(30, Number(daysRaw) || 10));
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
@@ -32,16 +29,24 @@ export async function GET(request: NextRequest) {
     ""
   ).trim();
 
+  // Parallel: Mandanten-Resolution für Worker/Manager + ggf. Admin-Tenant-Param.
+  const [actorMandantId, adminFilterTenant] = await Promise.all([
+    ctx.isAdmin ? Promise.resolve<string | null>(null) : resolveActorMandantId(ctx.service, ctx.userId),
+    ctx.isAdmin && rawTenantParam
+      ? resolveMandantTenantId(ctx.service, rawTenantParam)
+      : Promise.resolve<string | null>(null),
+  ]);
+
   let filterTenant: string | null = null;
   if (ctx.isAdmin) {
     if (rawTenantParam) {
-      filterTenant = await resolveMandantTenantId(ctx.service, rawTenantParam);
-      if (!filterTenant) {
+      if (!adminFilterTenant) {
         return NextResponse.json(
           { error: "Unbekannter Mandant (tenantId/company_id)." },
           { status: 400 },
         );
       }
+      filterTenant = adminFilterTenant;
     }
   } else {
     filterTenant = actorMandantId ?? ctx.tenantId;
@@ -88,7 +93,10 @@ export async function GET(request: NextRequest) {
   let res = await trySelect(true, false, true);
 
   if (!res.error) {
-    return NextResponse.json({ days, cases: res.data ?? [] });
+    return NextResponse.json(
+      { days, cases: res.data ?? [] },
+      { headers: PRIVATE_SWR_HEADERS },
+    );
   }
 
   let errMsg = res.error.message ?? "";
@@ -96,7 +104,10 @@ export async function GET(request: NextRequest) {
   if (errMsg.includes("column ai_cases.photo_urls does not exist")) {
     res = await trySelect(false, false, true);
     if (!res.error) {
-      return NextResponse.json({ days, cases: res.data ?? [] });
+      return NextResponse.json(
+        { days, cases: res.data ?? [] },
+        { headers: PRIVATE_SWR_HEADERS },
+      );
     }
     errMsg = res.error.message ?? "";
   }
@@ -104,13 +115,19 @@ export async function GET(request: NextRequest) {
   if (errMsg.includes("column ai_cases.company_id does not exist")) {
     res = await trySelect(true, true, true);
     if (!res.error) {
-      return NextResponse.json({ days, cases: res.data ?? [] });
+      return NextResponse.json(
+        { days, cases: res.data ?? [] },
+        { headers: PRIVATE_SWR_HEADERS },
+      );
     }
     errMsg = res.error.message ?? "";
     if (errMsg.includes("column ai_cases.photo_urls does not exist")) {
       res = await trySelect(false, true, true);
       if (!res.error) {
-        return NextResponse.json({ days, cases: res.data ?? [] });
+        return NextResponse.json(
+          { days, cases: res.data ?? [] },
+          { headers: PRIVATE_SWR_HEADERS },
+        );
       }
     }
     errMsg = res.error?.message ?? errMsg;
@@ -126,7 +143,10 @@ export async function GET(request: NextRequest) {
       res = await trySelect(false, false, false);
     }
     if (!res.error) {
-      return NextResponse.json({ days, cases: res.data ?? [] });
+      return NextResponse.json(
+        { days, cases: res.data ?? [] },
+        { headers: PRIVATE_SWR_HEADERS },
+      );
     }
     errMsg = res.error.message ?? errMsg;
   }

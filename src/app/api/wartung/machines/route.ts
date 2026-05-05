@@ -3,6 +3,7 @@ import { fetchMachinesWithLocations } from "@/lib/fetchMachines";
 import { resolveKonzernDataScopeAsync } from "@/lib/resolveKonzernDataScopeAsync";
 import { requireKonzernTenantContext } from "@/lib/konzernTenantContext";
 import { resolveDemoGuestContextFromRequest } from "@/lib/demoGuestContext.server";
+import { PRIVATE_SWR_HEADERS, PUBLIC_SWR_HEADERS } from "@/lib/httpCache";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -71,7 +72,10 @@ export async function GET(request: Request) {
 
   const ids = list.map((m) => m.id);
   if (ids.length === 0) {
-    return NextResponse.json({ machines: list, can_edit_serial: canEditSerial });
+    return NextResponse.json(
+      { machines: list, can_edit_serial: canEditSerial },
+      { headers: isDemo ? PUBLIC_SWR_HEADERS : PRIVATE_SWR_HEADERS },
+    );
   }
 
   const baseLogsQuery = (select: string) =>
@@ -193,5 +197,8 @@ export async function GET(request: Request) {
     logs: logsByMachine.get(m.id) ?? [],
   }));
 
-  return NextResponse.json({ machines: out, can_edit_serial: canEditSerial });
+  return NextResponse.json(
+    { machines: out, can_edit_serial: canEditSerial },
+    { headers: isDemo ? PUBLIC_SWR_HEADERS : PRIVATE_SWR_HEADERS },
+  );
 }

@@ -32,15 +32,62 @@ export async function DELETE(
     );
   }
 
-  const delMandate = await ctx.service.from("mandates").delete().eq("id", locId);
-  const error =
-    delMandate.error?.message?.toLowerCase().includes("mandates")
-      ? (await ctx.service.from("locations").delete().eq("id", locId)).error
-      : delMandate.error;
+  // Beide Tabellen werden parallel gepflegt (mandates ist Nachfolger, locations
+  // ist Legacy mit Backfill). Ein einfaches `delete` auf nur eine der beiden
+  // gibt schweigend 0 Zeilen zurück, wenn der Datensatz nur in der anderen liegt.
+  // Daher: in beiden löschen, Fehler nur dann, wenn beide scheitern UND die Tabelle existiert.
+  const delMandate = await ctx.service
+    .from("mandates")
+    .delete({ count: "exact" })
+    .eq("id", locId);
+  const mandateMissing = delMandate.error?.message
+    ?.toLowerCase()
+    .includes("mandates");
+  const mandateRows =
+    typeof delMandate.count === "number" ? delMandate.count : 0;
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500, headers: NO_STORE_HEADERS });
+  const delLocation = await ctx.service
+    .from("locations")
+    .delete({ count: "exact" })
+    .eq("id", locId);
+  const locationMissing = delLocation.error?.message
+    ?.toLowerCase()
+    .includes("locations");
+  const locationRows =
+    typeof delLocation.count === "number" ? delLocation.count : 0;
+
+  const totalAffected = mandateRows + locationRows;
+
+  // Wenn beide Tabellen existieren und keine einzige Zeile getroffen wurde → 404.
+  if (
+    !mandateMissing &&
+    !locationMissing &&
+    totalAffected === 0 &&
+    !delMandate.error &&
+    !delLocation.error
+  ) {
+    return NextResponse.json(
+      { error: "Mandat nicht gefunden." },
+      { status: 404, headers: NO_STORE_HEADERS },
+    );
   }
 
-  return NextResponse.json({ ok: true }, { headers: NO_STORE_HEADERS });
+  // Fehler nur reporten, wenn die jeweilige Tabelle existiert.
+  if (delMandate.error && !mandateMissing) {
+    return NextResponse.json(
+      { error: delMandate.error.message },
+      { status: 500, headers: NO_STORE_HEADERS },
+    );
+  }
+  if (delLocation.error && !locationMissing) {
+    return NextResponse.json(
+      { error: delLocation.error.message },
+      { status: 500, headers: NO_STORE_HEADERS },
+    );
+  }
+
+  return NextResponse.json(
+    { ok: true, deleted: { mandates: mandateRows, locations: locationRows } },
+    { headers: NO_STORE_HEADERS },
+  );
 }

@@ -1,12 +1,22 @@
 import { NextResponse } from "next/server";
 import { requireAdminApiSession } from "@/app/admin/hq/_lib/requireAdminApiSession";
 import { resolvePublicTeamScopeMandant } from "@/lib/siteTeamScope";
+import { NO_STORE_HEADERS, PRIVATE_SWR_HEADERS } from "@/lib/httpCache";
 
 export const dynamic = "force-dynamic";
 
-const NO_STORE_HEADERS = {
-  "Cache-Control": "private, no-store",
-} as const;
+/**
+ * Modul-Level-Schema-Memo: nach dem ersten erfolgreichen Read wissen wir,
+ * welche Spaltenkombination die DB unterstützt. Spätere Reads springen direkt
+ * zum richtigen SELECT — spart pro Hot-Path-Request bis zu 5 sequenzielle
+ * DB-Round-Trips für die Spalten-Probierschleife.
+ */
+type TeamMembersSchema = {
+  scopeColumn: "mandant_id" | "tenant_id";
+  hasPublicTitle: boolean;
+  hasIsPublic: boolean;
+};
+let cachedTeamMembersSchema: TeamMembersSchema | null = null;
 
 export type TeamMemberRow = {
   id: string;
@@ -47,6 +57,77 @@ function cleanSortOrder(v: unknown): number {
   return Math.max(0, Math.min(10000, Math.trunc(n)));
 }
 
+function buildTeamSelect(schema: TeamMembersSchema): string {
+  const cols = ["id", "name", "role"];
+  if (schema.hasPublicTitle) cols.push("public_title");
+  if (schema.hasIsPublic) cols.push("is_public");
+  cols.push("email", "phone", "photo_url", "sort_order", "created_at", "updated_at");
+  return cols.join(",");
+}
+
+async function selectTeamMembers(
+  service: import("@supabase/supabase-js").SupabaseClient,
+  scopeMandant: string,
+  schema: TeamMembersSchema,
+): Promise<{ data: unknown; error: { message: string } | null }> {
+  const r = await service
+    .from("team_members")
+    .select(buildTeamSelect(schema))
+    .eq(schema.scopeColumn, scopeMandant)
+    .order("sort_order", { ascending: true })
+    .order("created_at", { ascending: false });
+  return { data: r.data, error: r.error };
+}
+
+/**
+ * Probiert alle Schema-Varianten in der bekannten Reihenfolge — beim ersten
+ * Erfolg wird das Schema im Modul-Cache gemerkt, damit weitere Requests in
+ * derselben Server-Instanz direkt mit dem richtigen SELECT starten.
+ */
+async function selectTeamMembersWithSchemaProbe(
+  service: import("@supabase/supabase-js").SupabaseClient,
+  scopeMandant: string,
+): Promise<{ data: unknown; error: { message: string } | null }> {
+  if (cachedTeamMembersSchema) {
+    const r = await selectTeamMembers(service, scopeMandant, cachedTeamMembersSchema);
+    if (!r.error) return r;
+    // Schema-Drift (Migration durchgelaufen?) → Cache verwerfen, neu probieren.
+    cachedTeamMembersSchema = null;
+  }
+
+  const probes: TeamMembersSchema[] = [
+    { scopeColumn: "mandant_id", hasPublicTitle: true, hasIsPublic: true },
+    { scopeColumn: "tenant_id", hasPublicTitle: true, hasIsPublic: true },
+    { scopeColumn: "mandant_id", hasPublicTitle: false, hasIsPublic: true },
+    { scopeColumn: "tenant_id", hasPublicTitle: false, hasIsPublic: true },
+    { scopeColumn: "mandant_id", hasPublicTitle: false, hasIsPublic: false },
+    { scopeColumn: "tenant_id", hasPublicTitle: false, hasIsPublic: false },
+  ];
+
+  let last: { data: unknown; error: { message: string } | null } = {
+    data: null,
+    error: { message: "kein Probe ausgeführt" },
+  };
+  for (const probe of probes) {
+    last = await selectTeamMembers(service, scopeMandant, probe);
+    if (!last.error) {
+      cachedTeamMembersSchema = probe;
+      return last;
+    }
+    const msg = last.error.message ?? "";
+    // Fehler an völlig unbekannter Stelle → Cache nicht setzen, raus.
+    if (
+      !msg.includes("mandant_id") &&
+      !msg.includes("tenant_id") &&
+      !msg.includes("public_title") &&
+      !msg.includes("is_public")
+    ) {
+      return last;
+    }
+  }
+  return last;
+}
+
 export async function GET() {
   const ctx = await requireAdminApiSession();
   if (ctx instanceof NextResponse) return ctx;
@@ -59,71 +140,22 @@ export async function GET() {
   }
   const scopeMandant = scope.scopeMandant;
 
-  let r: {
-    data: unknown;
-    error: { message: string } | null;
-  } = await ctx.service
-    .from("team_members")
-    .select(
-      "id,name,role,public_title,is_public,email,phone,photo_url,sort_order,created_at,updated_at",
-    )
-    .eq("mandant_id", scopeMandant)
-    .order("sort_order", { ascending: true })
-    .order("created_at", { ascending: false });
-  if (r.error?.message.includes("mandant_id")) {
-    r = await ctx.service
-      .from("team_members")
-      .select(
-        "id,name,role,public_title,is_public,email,phone,photo_url,sort_order,created_at,updated_at",
-      )
-      .eq("tenant_id", scopeMandant)
-      .order("sort_order", { ascending: true })
-      .order("created_at", { ascending: false });
-  }
-  if (r.error?.message.includes("public_title")) {
-    r = await ctx.service
-      .from("team_members")
-      .select("id,name,role,is_public,email,phone,photo_url,sort_order,created_at,updated_at")
-      .eq("mandant_id", scopeMandant)
-      .order("sort_order", { ascending: true })
-      .order("created_at", { ascending: false });
-    if (r.error?.message.includes("mandant_id")) {
-      r = await ctx.service
-        .from("team_members")
-        .select("id,name,role,is_public,email,phone,photo_url,sort_order,created_at,updated_at")
-        .eq("tenant_id", scopeMandant)
-        .order("sort_order", { ascending: true })
-        .order("created_at", { ascending: false });
-    }
-  }
-  if (r.error?.message.includes("is_public")) {
-    r = await ctx.service
-      .from("team_members")
-      .select("id,name,role,email,phone,photo_url,sort_order,created_at,updated_at")
-      .eq("mandant_id", scopeMandant)
-      .order("sort_order", { ascending: true })
-      .order("created_at", { ascending: false });
-    if (r.error?.message.includes("mandant_id")) {
-      r = await ctx.service
-        .from("team_members")
-        .select("id,name,role,email,phone,photo_url,sort_order,created_at,updated_at")
-        .eq("tenant_id", scopeMandant)
-        .order("sort_order", { ascending: true })
-        .order("created_at", { ascending: false });
-    }
-  }
+  const r = await selectTeamMembersWithSchemaProbe(ctx.service, scopeMandant);
 
   if (r.error) {
     if (r.error.message.includes("team_members")) {
       return NextResponse.json(
         { items: [] as TeamMemberRow[], warning: "team_members fehlt — Migration ausführen." },
-        { headers: NO_STORE_HEADERS },
+        { headers: PRIVATE_SWR_HEADERS },
       );
     }
     return NextResponse.json({ error: r.error.message }, { status: 500, headers: NO_STORE_HEADERS });
   }
 
-  return NextResponse.json({ items: (r.data ?? []) as TeamMemberRow[] }, { headers: NO_STORE_HEADERS });
+  return NextResponse.json(
+    { items: (r.data ?? []) as TeamMemberRow[] },
+    { headers: PRIVATE_SWR_HEADERS },
+  );
 }
 
 export async function POST(req: Request) {

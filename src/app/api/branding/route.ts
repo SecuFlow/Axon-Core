@@ -5,6 +5,7 @@ import { toClientBrandingPayload } from "@/lib/brandingDisplay";
 import { loadCompanyBranding } from "@/lib/companyBranding.server";
 import { getDefaultDemoSlug } from "@/lib/defaultDemoSlug.server";
 import { resolveDemoCompanyByParam } from "@/lib/resolveDemoCompanyByParam.server";
+import { PRIVATE_SWR_HEADERS, PUBLIC_SWR_LONG_HEADERS } from "@/lib/httpCache";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -92,12 +93,9 @@ export async function GET(request: Request) {
         brand_name: brandName,
         name: brandName,
       },
-      {
-        headers: {
-          "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-          Pragma: "no-cache",
-        },
-      },
+      // Demo-Branding ist anonym und ändert sich selten → stark cachebar
+      // (CDN: 5 min, SWR bis 1 Stunde).
+      { headers: PUBLIC_SWR_LONG_HEADERS },
     );
   }
 
@@ -147,11 +145,6 @@ export async function GET(request: Request) {
       name: b.brand_name,
       show_cta: false,
     },
-    {
-      headers: {
-        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-        Pragma: "no-cache",
-      },
-    },
+    { headers: PRIVATE_SWR_HEADERS },
   );
 }

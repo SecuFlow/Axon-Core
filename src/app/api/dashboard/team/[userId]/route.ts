@@ -45,6 +45,31 @@ async function tenantForProfileCompany(
   return typeof t === "string" && t.length > 0 ? t : null;
 }
 
+/**
+ * Profil-Update mit konsistenter Mandanten-Synchronisation.
+ * Wenn `tenant_id` mitgegeben wird, wird `mandant_id` auf denselben Wert gespiegelt
+ * (mandant_id ist seit Migration 20260415213000 die kanonische Mandanten-Spalte).
+ * Fallbacks decken Legacy-DBs ohne mandant_id-Spalte ab.
+ */
+async function patchProfileWithMandantSync(
+  service: import("@supabase/supabase-js").SupabaseClient,
+  profileId: string,
+  patch: Record<string, unknown>,
+): Promise<{ error: { message: string } | null }> {
+  const enriched: Record<string, unknown> = { ...patch };
+  if ("tenant_id" in enriched && !("mandant_id" in enriched)) {
+    enriched.mandant_id = enriched.tenant_id;
+  }
+
+  let res = await service.from("profiles").update(enriched).eq("id", profileId);
+  if (res.error?.message.includes("mandant_id")) {
+    const fb = { ...enriched };
+    delete fb.mandant_id;
+    res = await service.from("profiles").update(fb).eq("id", profileId);
+  }
+  return { error: res.error ?? null };
+}
+
 export async function PATCH(
   request: NextRequest,
   context: { params: Promise<{ userId: string }> },
@@ -224,15 +249,12 @@ export async function PATCH(
   if (ctx.isAdmin && body.assign_company_id !== undefined) {
     const raw = body.assign_company_id;
     if (raw === null || (typeof raw === "string" && !raw.trim())) {
-      const { error: upErr } = await service
-        .from("profiles")
-        .update({
-          company_id: null,
-          tenant_id: null,
-          location_id: null,
-          updated_at: now,
-        })
-        .eq("id", idEq);
+      const { error: upErr } = await patchProfileWithMandantSync(service, idEq, {
+        company_id: null,
+        tenant_id: null,
+        location_id: null,
+        updated_at: now,
+      });
       if (upErr) {
         return NextResponse.json({ error: upErr.message }, { status: 500 });
       }
@@ -272,10 +294,11 @@ export async function PATCH(
         patch.location_id = null;
       }
 
-      const { error: upErr } = await service
-        .from("profiles")
-        .update(patch)
-        .eq("id", idEq);
+      const { error: upErr } = await patchProfileWithMandantSync(
+        service,
+        idEq,
+        patch,
+      );
       if (upErr) {
         return NextResponse.json({ error: upErr.message }, { status: 500 });
       }
@@ -300,10 +323,10 @@ export async function PATCH(
     const locVal = body.location_id;
 
     if (locVal === null) {
-      const { error: upErr } = await service
-        .from("profiles")
-        .update({ location_id: null, updated_at: now })
-        .eq("id", idEq);
+      const { error: upErr } = await patchProfileWithMandantSync(service, idEq, {
+        location_id: null,
+        updated_at: now,
+      });
       if (upErr) {
         return NextResponse.json({ error: upErr.message }, { status: 500 });
       }
@@ -343,14 +366,11 @@ export async function PATCH(
         return NextResponse.json({ error: "Kein Zugriff." }, { status: 403 });
       }
 
-      const { error: upErr } = await service
-        .from("profiles")
-        .update({
-          location_id: locVal.trim(),
-          tenant_id: locTenant,
-          updated_at: now,
-        })
-        .eq("id", idEq);
+      const { error: upErr } = await patchProfileWithMandantSync(service, idEq, {
+        location_id: locVal.trim(),
+        tenant_id: locTenant,
+        updated_at: now,
+      });
       if (upErr) {
         return NextResponse.json({ error: upErr.message }, { status: 500 });
       }

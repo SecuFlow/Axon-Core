@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { loadCompanyBranding } from "@/lib/companyBranding.server";
+import { PRIVATE_SWR_HEADERS } from "@/lib/httpCache";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -45,22 +46,20 @@ export async function GET() {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
-  const { data } = await service
-    .from("profiles")
-    .select("*, companies(*)")
-    .eq("id", user.id)
-    .maybeSingle();
-
-  const branding = await loadCompanyBranding(service, user.id);
+  // Profil-Join und Branding-Resolution parallel: spart 1× Round-Trip-Latenz
+  // (vorher sequenziell: getUser → profiles+companies → branding-Pfad).
+  const [profileRes, branding] = await Promise.all([
+    service
+      .from("profiles")
+      .select("*, companies(*)")
+      .eq("id", user.id)
+      .maybeSingle(),
+    loadCompanyBranding(service, user.id),
+  ]);
 
   return NextResponse.json(
-    { profile: data ?? null, branding },
-    {
-      headers: {
-        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-        Pragma: "no-cache",
-      },
-    },
+    { profile: profileRes.data ?? null, branding },
+    { headers: PRIVATE_SWR_HEADERS },
   );
 }
 

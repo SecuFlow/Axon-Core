@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { PUBLIC_SWR_HEADERS } from "@/lib/httpCache";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +17,10 @@ export async function GET() {
   const supabaseAnonKey =
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.replace(/\s/g, "");
   if (!supabaseUrl || !supabaseAnonKey) {
-    return NextResponse.json({ items: [] as PublicVideoItem[] });
+    return NextResponse.json(
+      { items: [] as PublicVideoItem[] },
+      { headers: PUBLIC_SWR_HEADERS },
+    );
   }
 
   const supabase = createClient(supabaseUrl, supabaseAnonKey, {
@@ -33,6 +37,9 @@ export async function GET() {
     return NextResponse.json({ error: r.error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ items: (r.data ?? []) as PublicVideoItem[] });
+  return NextResponse.json(
+    { items: (r.data ?? []) as PublicVideoItem[] },
+    { headers: PUBLIC_SWR_HEADERS },
+  );
 }
 

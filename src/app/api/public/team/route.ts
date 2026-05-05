@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { PUBLIC_SWR_HEADERS } from "@/lib/httpCache";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +35,10 @@ export async function GET() {
   const supabaseUrl = sanitizeEnv(process.env.NEXT_PUBLIC_SUPABASE_URL);
   const serviceRoleKey = sanitizeEnv(process.env.SUPABASE_SERVICE_ROLE_KEY);
   if (!supabaseUrl || !serviceRoleKey) {
-    return NextResponse.json({ items: [] as PublicTeamMember[] });
+    return NextResponse.json(
+      { items: [] as PublicTeamMember[] },
+      { headers: PUBLIC_SWR_HEADERS },
+    );
   }
 
   const service = createClient(supabaseUrl, serviceRoleKey, {
@@ -61,12 +65,18 @@ export async function GET() {
   }
 
   if (r.error?.message.includes("is_public")) {
-    return NextResponse.json({ items: [] as PublicTeamMember[] });
+    return NextResponse.json(
+      { items: [] as PublicTeamMember[] },
+      { headers: PUBLIC_SWR_HEADERS },
+    );
   }
 
   if (r.error) {
     if (r.error.message.toLowerCase().includes("team_members")) {
-      return NextResponse.json({ items: [] as PublicTeamMember[] });
+      return NextResponse.json(
+        { items: [] as PublicTeamMember[] },
+        { headers: PUBLIC_SWR_HEADERS },
+      );
     }
     return NextResponse.json({ error: r.error.message }, { status: 500 });
   }
@@ -94,5 +104,5 @@ export async function GET() {
       sort_order: typeof row.sort_order === "number" ? row.sort_order : 100,
     }));
 
-  return NextResponse.json({ items });
+  return NextResponse.json({ items }, { headers: PUBLIC_SWR_HEADERS });
 }

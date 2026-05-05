@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { loadCompanyBranding } from "@/lib/companyBranding.server";
+import { NO_STORE_HEADERS, PRIVATE_SWR_HEADERS } from "@/lib/httpCache";
 
 const sanitizeEnv = (value: string | undefined) => {
   if (!value) return undefined;
@@ -16,7 +17,10 @@ export async function GET() {
   const serviceRoleKey = sanitizeEnv(process.env.SUPABASE_SERVICE_ROLE_KEY);
 
   if (!accessToken || !supabaseUrl || !supabaseAnonKey || !serviceRoleKey) {
-    return NextResponse.json({ error: "Nicht angemeldet." }, { status: 401 });
+    return NextResponse.json(
+      { error: "Nicht angemeldet." },
+      { status: 401, headers: NO_STORE_HEADERS },
+    );
   }
 
   const userScoped = createClient(supabaseUrl, supabaseAnonKey, {
@@ -27,18 +31,26 @@ export async function GET() {
     data: { user },
   } = await userScoped.auth.getUser();
   if (!user) {
-    return NextResponse.json({ error: "Sitzung ungültig." }, { status: 401 });
+    return NextResponse.json(
+      { error: "Sitzung ungültig." },
+      { status: 401, headers: NO_STORE_HEADERS },
+    );
   }
 
   const service = createClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
-  const profileRes = await service
-    .from("profiles")
-    .select("mandant_id,tenant_id,company_id,must_change_password")
-    .eq("id", user.id)
-    .maybeSingle();
+  // Profil-Lookup und Branding-Resolution parallel — beide brauchen denselben
+  // Service-Client und teilen keine Daten, daher konfliktfrei in Promise.all.
+  const [profileRes, branding] = await Promise.all([
+    service
+      .from("profiles")
+      .select("mandant_id,tenant_id,company_id,must_change_password")
+      .eq("id", user.id)
+      .maybeSingle(),
+    loadCompanyBranding(service, user.id),
+  ]);
 
   const p = profileRes.data as
     | {
@@ -54,16 +66,18 @@ export async function GET() {
   if (!mandantId) {
     return NextResponse.json(
       { error: "Keine Mandanten-Zuordnung für Mitarbeiter." },
-      { status: 403 },
+      { status: 403, headers: NO_STORE_HEADERS },
     );
   }
 
-  const branding = await loadCompanyBranding(service, user.id);
-  return NextResponse.json({
-    ok: true,
-    mandant_id: mandantId,
-    must_change_password: p?.must_change_password === true,
-    accessToken,
-    branding,
-  });
+  return NextResponse.json(
+    {
+      ok: true,
+      mandant_id: mandantId,
+      must_change_password: p?.must_change_password === true,
+      accessToken,
+      branding,
+    },
+    { headers: PRIVATE_SWR_HEADERS },
+  );
 }

@@ -59,7 +59,18 @@ export async function POST(req: Request) {
   const username = (payload.username ?? "").trim();
   const rawRole = (payload.role ?? "").trim().toLowerCase();
   const rawAccount = (payload.accountType ?? "").trim().toLowerCase();
-  if (rawRole === "worker" || rawRole === "mitarbeiter" || rawRole === "employee") {
+
+  // Mitarbeiter-Konten dürfen NUR durch den Manager im Dashboard angelegt werden.
+  // Wir blocken sowohl explizite Worker-Rollen als auch Worker-Account-Types,
+  // damit der Endpoint nicht über das andere Feld umgangen werden kann.
+  const WORKER_ROLE_ALIASES = new Set([
+    "worker",
+    "mitarbeiter",
+    "employee",
+    "user",
+    "staff",
+  ]);
+  if (WORKER_ROLE_ALIASES.has(rawRole) || WORKER_ROLE_ALIASES.has(rawAccount)) {
     return NextResponse.json(
       {
         error:
@@ -69,14 +80,35 @@ export async function POST(req: Request) {
     );
   }
 
-  const normalizedRole =
+  // Strikte Whitelist: jede unbekannte Rolle wird hart abgelehnt, anstatt still
+  // auf "enterprise" zu fallen. Das verhindert versehentliche Privilege-Drift,
+  // wenn das Frontend einen neuen Account-Typ einführt, ohne den Server zu kennen.
+  const ALLOWED_ROLES = new Set([
+    "",
+    "private",
+    "privat",
+    "small_business",
+    "kleinunternehmer",
+    "enterprise",
+    "konzern",
+  ]);
+  if (!ALLOWED_ROLES.has(rawRole)) {
+    return NextResponse.json(
+      { error: "Ungültiger Account-Typ." },
+      { status: 400 },
+    );
+  }
+
+  const normalizedRole: "private" | "small_business" | "enterprise" =
     rawRole === "privat" || rawRole === "private"
       ? "private"
       : rawRole === "kleinunternehmer" || rawRole === "small_business"
         ? "small_business"
         : "enterprise";
-  const accountType =
-    normalizedRole === "private" || rawAccount === "private" ? "private" : "enterprise";
+  const accountType: "private" | "enterprise" =
+    normalizedRole === "private" || rawAccount === "private"
+      ? "private"
+      : "enterprise";
   const companyName = resolveCompanyName(
     username || payload.companyName,
     email,

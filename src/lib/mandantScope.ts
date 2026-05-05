@@ -17,7 +17,16 @@ export function applyMandantFilter<T extends EqCapableQuery>(
 
 /**
  * Ermittelt die Mandanten-ID des eingeloggten Users.
- * Reihenfolge: profiles.mandant_id -> profiles.tenant_id -> profiles.company_id -> companies.mandant_id -> companies.tenant_id
+ *
+ * Reihenfolge (nur echte Mandanten-UUIDs):
+ *   1) profiles.mandant_id
+ *   2) profiles.tenant_id
+ *   3) companies.mandant_id / companies.tenant_id über profiles.company_id (PK)
+ *   4) companies.mandant_id / companies.tenant_id über companies.user_id
+ *
+ * Wichtig: profiles.company_id ist ein FK auf companies.id (PK) und NICHT
+ * direkt eine Mandanten-UUID — daher darf der Wert NIE als Mandant zurückgegeben
+ * werden, sondern muss erst zu companies.tenant_id resolved werden.
  */
 export async function resolveActorMandantId(
   service: SupabaseClient,
@@ -29,18 +38,43 @@ export async function resolveActorMandantId(
     .eq("id", userId)
     .maybeSingle();
 
+  let companyPkFromProfile: string | null = null;
+
   if (!profileRes.error && profileRes.data) {
     const row = profileRes.data as {
       mandant_id?: unknown;
       tenant_id?: unknown;
       company_id?: unknown;
     };
-    const fromProfile =
+
+    const directMandant =
       (typeof row.mandant_id === "string" && row.mandant_id.trim()) ||
       (typeof row.tenant_id === "string" && row.tenant_id.trim()) ||
-      (typeof row.company_id === "string" && row.company_id.trim()) ||
       "";
-    if (fromProfile) return fromProfile;
+    if (directMandant) return directMandant;
+
+    if (typeof row.company_id === "string" && row.company_id.trim()) {
+      companyPkFromProfile = row.company_id.trim();
+    }
+  }
+
+  if (companyPkFromProfile) {
+    const viaCompanyPk = await service
+      .from("companies")
+      .select("mandant_id,tenant_id")
+      .eq("id", companyPkFromProfile)
+      .maybeSingle();
+    if (!viaCompanyPk.error && viaCompanyPk.data) {
+      const r = viaCompanyPk.data as {
+        mandant_id?: unknown;
+        tenant_id?: unknown;
+      };
+      const resolved =
+        (typeof r.mandant_id === "string" && r.mandant_id.trim()) ||
+        (typeof r.tenant_id === "string" && r.tenant_id.trim()) ||
+        "";
+      if (resolved) return resolved;
+    }
   }
 
   const companyRes = await service

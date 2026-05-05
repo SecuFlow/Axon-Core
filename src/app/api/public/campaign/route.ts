@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { PUBLIC_SWR_HEADERS } from "@/lib/httpCache";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,7 +14,7 @@ export async function GET() {
   const supabaseUrl = sanitizeEnv(process.env.NEXT_PUBLIC_SUPABASE_URL);
   const serviceRoleKey = sanitizeEnv(process.env.SUPABASE_SERVICE_ROLE_KEY);
   if (!supabaseUrl || !serviceRoleKey) {
-    return NextResponse.json({ enabled: false });
+    return NextResponse.json({ enabled: false }, { headers: PUBLIC_SWR_HEADERS });
   }
 
   const service = createClient(supabaseUrl, serviceRoleKey, {
@@ -28,7 +29,7 @@ export async function GET() {
     .maybeSingle();
 
   if (res.error) {
-    return NextResponse.json({ enabled: false });
+    return NextResponse.json({ enabled: false }, { headers: PUBLIC_SWR_HEADERS });
   }
 
   const row = res.data as
@@ -43,7 +44,7 @@ export async function GET() {
     | null;
 
   const enabled = row?.enabled === true;
-  if (!enabled) return NextResponse.json({ enabled: false });
+  if (!enabled) return NextResponse.json({ enabled: false }, { headers: PUBLIC_SWR_HEADERS });
 
   const title = typeof row?.title === "string" ? row.title.trim() : "";
   const subtitle = typeof row?.subtitle === "string" ? row.subtitle.trim() : "";
@@ -52,13 +53,16 @@ export async function GET() {
   const banner_image_url =
     typeof row?.banner_image_url === "string" ? row.banner_image_url.trim() : "";
 
-  return NextResponse.json({
-    enabled: true,
-    title: title || null,
-    subtitle: subtitle || null,
-    cta_label: cta_label || null,
-    cta_href: cta_href || null,
-    banner_image_url: banner_image_url || null,
-  });
+  return NextResponse.json(
+    {
+      enabled: true,
+      title: title || null,
+      subtitle: subtitle || null,
+      cta_label: cta_label || null,
+      cta_href: cta_href || null,
+      banner_image_url: banner_image_url || null,
+    },
+    { headers: PUBLIC_SWR_HEADERS },
+  );
 }
 
