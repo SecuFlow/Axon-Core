@@ -24,6 +24,13 @@ const APOLLO_COLUMNS = [
   "apollo_industries",
   "apollo_industries_smb",
   "apollo_reveal_personal_emails",
+  "apollo_qualification_enabled",
+  "apollo_qualification_threshold",
+  "apollo_min_revenue_eur_enterprise",
+  "apollo_min_revenue_eur_smb",
+  "apollo_blacklist_industries",
+  "apollo_require_domain_mx",
+  "apollo_require_email_verified",
 ] as const;
 
 const SELECT_ALL =
@@ -87,6 +94,24 @@ function defaultsResponse() {
     apollo_industries: [] as string[],
     apollo_industries_smb: [] as string[],
     apollo_reveal_personal_emails: false,
+    apollo_qualification_enabled: true,
+    apollo_qualification_threshold: 7,
+    apollo_min_revenue_eur_enterprise: 50_000_000,
+    apollo_min_revenue_eur_smb: 5_000_000,
+    apollo_blacklist_industries: [
+      "staffing and recruiting",
+      "marketing and advertising",
+      "advertising services",
+      "public relations and communications",
+      "management consulting",
+      "human resources services",
+      "computer software",
+      "information technology and services",
+      "internet",
+      "venture capital and private equity",
+    ] as string[],
+    apollo_require_domain_mx: true,
+    apollo_require_email_verified: true,
   };
 }
 
@@ -204,6 +229,35 @@ export async function GET() {
         "apollo_reveal_personal_emails",
         def.apollo_reveal_personal_emails,
       ),
+      apollo_qualification_enabled: bool(
+        "apollo_qualification_enabled",
+        def.apollo_qualification_enabled,
+      ),
+      apollo_qualification_threshold: clampInt(
+        num("apollo_qualification_threshold", def.apollo_qualification_threshold),
+        1,
+        10,
+      ),
+      apollo_min_revenue_eur_enterprise: num(
+        "apollo_min_revenue_eur_enterprise",
+        def.apollo_min_revenue_eur_enterprise,
+      ),
+      apollo_min_revenue_eur_smb: num(
+        "apollo_min_revenue_eur_smb",
+        def.apollo_min_revenue_eur_smb,
+      ),
+      apollo_blacklist_industries: arr(
+        "apollo_blacklist_industries",
+        def.apollo_blacklist_industries,
+      ),
+      apollo_require_domain_mx: bool(
+        "apollo_require_domain_mx",
+        def.apollo_require_domain_mx,
+      ),
+      apollo_require_email_verified: bool(
+        "apollo_require_email_verified",
+        def.apollo_require_email_verified,
+      ),
     },
     { headers: NO_STORE_HEADERS },
   );
@@ -272,6 +326,15 @@ export async function PATCH(request: NextRequest) {
   setArr("apollo_industries");
   setArr("apollo_industries_smb");
   setBool("apollo_reveal_personal_emails");
+
+  // ICP-Qualifikation
+  setBool("apollo_qualification_enabled");
+  setNum("apollo_qualification_threshold", 1, 10);
+  setNum("apollo_min_revenue_eur_enterprise", 0, 100_000_000_000);
+  setNum("apollo_min_revenue_eur_smb", 0, 100_000_000_000);
+  setArr("apollo_blacklist_industries");
+  setBool("apollo_require_domain_mx");
+  setBool("apollo_require_email_verified");
 
   if (Object.keys(update).length <= 1) {
     return NextResponse.json(

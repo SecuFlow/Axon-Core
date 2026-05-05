@@ -70,7 +70,10 @@ async function handle(req: Request) {
         skipped_duplicate_count: 0,
         skipped_no_email_count: 0,
         skipped_generic_mailbox_count: 0,
+        skipped_authenticity_count: 0,
+        skipped_unqualified_count: 0,
         apollo_credits_used: 0,
+        qualification_summary: [],
         error: "already_ran_today",
       });
       continue;

@@ -19,6 +19,26 @@ type Settings = {
   apollo_industries_smb: string[];
   apollo_reveal_personal_emails: boolean;
   leads_per_day_hard_cap: number;
+  // Phase 2: Echtheits-Check + LLM-ICP-Qualifikation
+  apollo_qualification_enabled: boolean;
+  apollo_qualification_threshold: number;
+  apollo_min_revenue_eur_enterprise: number;
+  apollo_min_revenue_eur_smb: number;
+  apollo_blacklist_industries: string[];
+  apollo_require_domain_mx: boolean;
+  apollo_require_email_verified: boolean;
+};
+
+type QualificationSummaryEntry = {
+  apollo_person_id?: string;
+  company?: string;
+  manager?: string;
+  industry?: string;
+  score?: number;
+  qualified?: boolean;
+  reason?: string;
+  authenticity_reason?: string;
+  llm_error?: string;
 };
 
 type DiscoveryRun = {
@@ -34,7 +54,10 @@ type DiscoveryRun = {
   skipped_duplicate_count: number;
   skipped_no_email_count: number;
   skipped_generic_mailbox_count: number;
+  skipped_authenticity_count?: number;
+  skipped_unqualified_count?: number;
   apollo_credits_used: number;
+  qualification_summary?: QualificationSummaryEntry[];
   error_message: string | null;
 };
 
@@ -78,6 +101,8 @@ export function ApolloDiscoverySection() {
   const [locations, setLocations] = useState("");
   const [industriesEnt, setIndustriesEnt] = useState("");
   const [industriesSmb, setIndustriesSmb] = useState("");
+  const [blacklistRaw, setBlacklistRaw] = useState("");
+  const [savingIcp, setSavingIcp] = useState(false);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -98,6 +123,7 @@ export function ApolloDiscoverySection() {
       setLocations(joinList((sJson as Settings).apollo_person_locations));
       setIndustriesEnt(joinList((sJson as Settings).apollo_industries));
       setIndustriesSmb(joinList((sJson as Settings).apollo_industries_smb));
+      setBlacklistRaw(joinList((sJson as Settings).apollo_blacklist_industries ?? []));
 
       if (r.ok) {
         const rJson = (await r.json()) as { runs?: DiscoveryRun[] };
@@ -132,6 +158,7 @@ export function ApolloDiscoverySection() {
       apollo_person_titles_smb?: string[];
       apollo_person_locations?: string[];
       apollo_person_seniorities?: string[];
+      apollo_blacklist_industries?: string[];
       // Outreach-Caps gleichzeitig mitschreiben (Cap-Sync mit Apollo-Targets)
       leads_per_day_enterprise?: number;
       leads_per_day_smb?: number;
@@ -228,6 +255,25 @@ export function ApolloDiscoverySection() {
       });
     }
     setSavingFilters(false);
+  };
+
+  const saveIcp = async () => {
+    if (!settings) return;
+    setSavingIcp(true);
+    const blacklistArr = parseList(blacklistRaw);
+    const ok = await patch({
+      apollo_qualification_enabled: settings.apollo_qualification_enabled,
+      apollo_qualification_threshold: settings.apollo_qualification_threshold,
+      apollo_min_revenue_eur_enterprise: settings.apollo_min_revenue_eur_enterprise,
+      apollo_min_revenue_eur_smb: settings.apollo_min_revenue_eur_smb,
+      apollo_blacklist_industries: blacklistArr,
+      apollo_require_domain_mx: settings.apollo_require_domain_mx,
+      apollo_require_email_verified: settings.apollo_require_email_verified,
+    });
+    if (ok) {
+      setSettings({ ...settings, apollo_blacklist_industries: blacklistArr });
+    }
+    setSavingIcp(false);
   };
 
   const runNow = async (segment: "enterprise" | "smb" | "both") => {
@@ -490,6 +536,166 @@ export function ApolloDiscoverySection() {
             </div>
           </section>
 
+          {/* ICP-Qualifikation: Echtheit + LLM */}
+          <section className="rounded-md border border-[#1f1f1f] bg-[#080808] p-4">
+            <p className="font-mono text-[10px] font-medium uppercase tracking-[0.16em] text-[#d4c896]">
+              ICP-Qualifikation (vor Insert)
+            </p>
+            <p className="mt-1 max-w-3xl font-mono text-[8px] leading-relaxed text-[#6a6a6a]">
+              Zwei zusätzliche Filter NACH Apollo-Search aber VOR Lead-Insert:
+              <br />
+              1) Echtheits-Check: Email-Status verifiziert, Firmen-Domain hat MX-Record,
+              Datenvollständigkeit (Branche/Manager/Firma).
+              <br />
+              2) LLM-ICP-Filter (GPT-4.1-mini): bewertet Branche/Größe/„Mindset" auf Score 1-10. Nur
+              wenn ≥ Threshold wird der Lead angelegt. Ziel: lieber 10 perfekte als 500 wertlose.
+            </p>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <div className="rounded-md border border-[#1a1a1a] bg-[#050505] p-3">
+                <p className="font-mono text-[9px] font-medium uppercase tracking-[0.14em] text-[#8a8a8a]">
+                  Echtheits-Check
+                </p>
+                <label className="mt-2 flex cursor-pointer items-center gap-2 font-mono text-[10px] text-[#c4c4c4]">
+                  <input
+                    type="checkbox"
+                    checked={settings.apollo_require_email_verified}
+                    onChange={(e) =>
+                      setSettings({ ...settings, apollo_require_email_verified: e.target.checked })
+                    }
+                    className="size-3.5 accent-[#c9a962]"
+                  />
+                  Email-Status muss „verified" sein
+                </label>
+                <label className="mt-2 flex cursor-pointer items-center gap-2 font-mono text-[10px] text-[#c4c4c4]">
+                  <input
+                    type="checkbox"
+                    checked={settings.apollo_require_domain_mx}
+                    onChange={(e) =>
+                      setSettings({ ...settings, apollo_require_domain_mx: e.target.checked })
+                    }
+                    className="size-3.5 accent-[#c9a962]"
+                  />
+                  Firmen-Domain muss MX-Record haben (DNS-Check)
+                </label>
+              </div>
+
+              <div className="rounded-md border border-[#1a1a1a] bg-[#050505] p-3">
+                <p className="font-mono text-[9px] font-medium uppercase tracking-[0.14em] text-[#8a8a8a]">
+                  KI-Vorauswahl (GPT-4.1-mini)
+                </p>
+                <label className="mt-2 flex cursor-pointer items-center gap-2 font-mono text-[10px] text-[#c4c4c4]">
+                  <input
+                    type="checkbox"
+                    checked={settings.apollo_qualification_enabled}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        apollo_qualification_enabled: e.target.checked,
+                      })
+                    }
+                    className="size-3.5 accent-[#c9a962]"
+                  />
+                  LLM-ICP-Bewertung aktiv
+                </label>
+                <div className="mt-3">
+                  <label className="font-mono text-[9px] uppercase tracking-[0.14em] text-[#8a8a8a]">
+                    Mindest-Score (1-10) · Default 7
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={10}
+                    value={settings.apollo_qualification_threshold}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        apollo_qualification_threshold: Math.max(
+                          1,
+                          Math.min(10, Number(e.target.value || 7)),
+                        ),
+                      })
+                    }
+                    className="mt-1 w-full rounded-md border border-[#262626] bg-[#0a0a0a] px-3 py-2 font-mono text-[12px] text-[#d4d4d4] outline-none focus:border-[#c9a962]/40"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <div>
+                <label className="font-mono text-[9px] uppercase tracking-[0.14em] text-[#8a8a8a]">
+                  Mindest-Umsatz Enterprise (EUR)
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  step={1_000_000}
+                  value={settings.apollo_min_revenue_eur_enterprise}
+                  onChange={(e) =>
+                    setSettings({
+                      ...settings,
+                      apollo_min_revenue_eur_enterprise: Math.max(0, Number(e.target.value || 0)),
+                    })
+                  }
+                  className="mt-1 w-full rounded-md border border-[#262626] bg-[#0a0a0a] px-3 py-2 font-mono text-[12px] text-[#d4d4d4] outline-none focus:border-[#c9a962]/40"
+                />
+                <p className="mt-1 font-mono text-[8px] text-[#6a6a6a]">
+                  ≈ {(settings.apollo_min_revenue_eur_enterprise / 1_000_000).toFixed(0)} Mio EUR
+                </p>
+              </div>
+              <div>
+                <label className="font-mono text-[9px] uppercase tracking-[0.14em] text-[#8a8a8a]">
+                  Mindest-Umsatz SMB (EUR)
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  step={1_000_000}
+                  value={settings.apollo_min_revenue_eur_smb}
+                  onChange={(e) =>
+                    setSettings({
+                      ...settings,
+                      apollo_min_revenue_eur_smb: Math.max(0, Number(e.target.value || 0)),
+                    })
+                  }
+                  className="mt-1 w-full rounded-md border border-[#262626] bg-[#0a0a0a] px-3 py-2 font-mono text-[12px] text-[#d4d4d4] outline-none focus:border-[#c9a962]/40"
+                />
+                <p className="mt-1 font-mono text-[8px] text-[#6a6a6a]">
+                  ≈ {(settings.apollo_min_revenue_eur_smb / 1_000_000).toFixed(0)} Mio EUR
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-3">
+              <label className="font-mono text-[9px] uppercase tracking-[0.14em] text-[#8a8a8a]">
+                Branchen-Blacklist (Hard-Block, Komma-separiert)
+              </label>
+              <textarea
+                rows={3}
+                value={blacklistRaw}
+                onChange={(e) => setBlacklistRaw(e.target.value)}
+                className="mt-1 w-full rounded-md border border-[#262626] bg-[#0a0a0a] px-3 py-2 font-mono text-[11px] text-[#d4d4d4] outline-none focus:border-[#c9a962]/40"
+              />
+              <p className="mt-1 font-mono text-[8px] text-[#6a6a6a]">
+                Diese Branchen werden NIE qualifiziert (z.B. Marketing, Recruiting, Software,
+                Consulting). Wirkt zusätzlich als Hint für das LLM.
+              </p>
+            </div>
+
+            <div className="mt-3 flex justify-end">
+              <button
+                type="button"
+                onClick={() => void saveIcp()}
+                disabled={savingIcp}
+                className="inline-flex items-center gap-2 rounded-md border border-[#c9a962]/45 bg-[#c9a962]/[0.08] px-4 py-2 font-mono text-[10px] uppercase tracking-[0.14em] text-[#d4c896] transition hover:bg-[#c9a962]/[0.14] disabled:opacity-50"
+              >
+                <Save className="size-3.5" />
+                ICP-Settings speichern
+              </button>
+            </div>
+          </section>
+
           {/* Filter */}
           <section className="rounded-md border border-[#1f1f1f] bg-[#080808] p-4">
             <p className="font-mono text-[10px] font-medium uppercase tracking-[0.16em] text-[#d4c896]">
@@ -673,15 +879,16 @@ export function ApolloDiscoverySection() {
                   <thead className="text-[#6a6a6a]">
                     <tr className="text-left">
                       <th className="pb-2 pr-3">Zeit</th>
-                      <th className="pb-2 pr-3">Trigger</th>
+                      <th className="pb-2 pr-3">Trig</th>
                       <th className="pb-2 pr-3">Seg</th>
                       <th className="pb-2 pr-3">Ziel</th>
                       <th className="pb-2 pr-3">Search</th>
                       <th className="pb-2 pr-3">Enrich</th>
                       <th className="pb-2 pr-3 text-[#d4c896]">Insert</th>
-                      <th className="pb-2 pr-3">Skip Dup</th>
-                      <th className="pb-2 pr-3">Skip ¬Mail</th>
-                      <th className="pb-2 pr-3">Credits</th>
+                      <th className="pb-2 pr-3" title="Echtheits-Check rausgefiltert">¬Auth</th>
+                      <th className="pb-2 pr-3" title="LLM unter Threshold">¬ICP</th>
+                      <th className="pb-2 pr-3">Dup</th>
+                      <th className="pb-2 pr-3">Cred</th>
                       <th className="pb-2 pr-3">Fehler</th>
                     </tr>
                   </thead>
@@ -702,10 +909,13 @@ export function ApolloDiscoverySection() {
                         <td className="py-1 pr-3">{r.searched_count}</td>
                         <td className="py-1 pr-3">{r.enriched_count}</td>
                         <td className="py-1 pr-3 text-[#d4c896]">{r.inserted_count}</td>
-                        <td className="py-1 pr-3">{r.skipped_duplicate_count}</td>
-                        <td className="py-1 pr-3">
-                          {r.skipped_no_email_count + r.skipped_generic_mailbox_count}
+                        <td className="py-1 pr-3 text-[#a0816a]">
+                          {r.skipped_authenticity_count ?? 0}
                         </td>
+                        <td className="py-1 pr-3 text-[#a0816a]">
+                          {r.skipped_unqualified_count ?? 0}
+                        </td>
+                        <td className="py-1 pr-3">{r.skipped_duplicate_count}</td>
                         <td className="py-1 pr-3">{r.apollo_credits_used}</td>
                         <td className="py-1 pr-3 text-red-300">
                           {r.error_message ? r.error_message.slice(0, 40) : "—"}
