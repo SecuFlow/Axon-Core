@@ -31,7 +31,7 @@ function WorkerLoginInner() {
       const resp = await fetch("/api/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password, flow: "konzern" }),
+        body: JSON.stringify({ email, password, flow: "worker" }),
       });
 
       const payload: { error?: string; redirect?: string } = await resp.json();

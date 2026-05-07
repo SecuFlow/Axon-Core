@@ -10,7 +10,7 @@ const sanitizeEnv = (value: string | undefined) => {
   return value.replace(/\s/g, "");
 };
 
-type LoginFlow = "konzern" | "admin";
+type LoginFlow = "konzern" | "admin" | "worker";
 
 type CompanyAuthRow = { role: string; is_subscribed: boolean };
 type ProfileAuthRow = { role: string; must_change_password: boolean };
@@ -120,7 +120,12 @@ export async function POST(req: Request) {
 
   const email = payload.email ?? "";
   const password = payload.password ?? "";
-  const flow: LoginFlow = payload.flow === "admin" ? "admin" : "konzern";
+  const flow: LoginFlow =
+    payload.flow === "admin"
+      ? "admin"
+      : payload.flow === "worker"
+        ? "worker"
+        : "konzern";
 
   const supabaseUrl = sanitizeEnv(process.env.NEXT_PUBLIC_SUPABASE_URL);
   const supabaseAnonKey = sanitizeEnv(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
@@ -183,6 +188,17 @@ export async function POST(req: Request) {
       );
     }
     redirect = "/admin/hq";
+  } else if (flow === "worker") {
+    const profileRow = await fetchProfileByUserId(userScoped, userId);
+    if (!profileRow || !isWorkerRole(profileRow.role)) {
+      return NextResponse.json(
+        { error: "Dieses Konto ist kein Mitarbeiter/Worker-Konto." },
+        { status: 403 },
+      );
+    }
+    redirect = profileRow.must_change_password
+      ? "/worker/passwort-aendern"
+      : "/worker/dashboard";
   } else {
     const metaRole = getMetadataRole(session.user);
     if (isPrivateUserRole(metaRole)) {
