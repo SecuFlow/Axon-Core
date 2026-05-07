@@ -121,6 +121,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: ctx.error }, { status: ctx.status, headers: CACHE_HEADERS });
   }
 
+  const includeDemo = ["1", "true", "yes"].includes(
+    (request.nextUrl.searchParams.get("include_demo") ?? "").trim().toLowerCase(),
+  );
+
   const mandateId = request.nextUrl.searchParams.get("mandate_id")?.trim() ?? "";
   if (mandateId) {
     const mandateRes = await ctx.service
@@ -312,9 +316,34 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // Keine Enterprise-/Demo-Filter im Admin-HQ: es ist eine interne Verwaltung und soll
-  // exakt die Standorte abbilden, die im Konzern-Dashboard sichtbar sind.
-  return finishGroups(list, nameByTenant, pkByTenant, logoByTenant, brancheByTenant, CACHE_HEADERS);
+  const looksLikeDemo = (raw: string) => {
+    const s = raw.trim().toLowerCase();
+    if (!s) return true;
+    if (s.startsWith("demo:")) return true;
+    if (/(^|\b)(demo|test|testing|placeholder|sample|beispiel)(\b|$)/i.test(s)) return true;
+    if (/(^|\b)(apple|google|microsoft|amazon|meta|tesla)(\b|$)/i.test(s)) return true;
+    return false;
+  };
+
+  const demoTenants = new Set<string>();
+  for (const row of comps ?? []) {
+    const r = row as {
+      tenant_id?: string;
+      name?: string | null;
+      show_cta?: boolean | null;
+      demo_slug?: string | null;
+      is_demo_active?: boolean | null;
+    };
+    if (!r.tenant_id) continue;
+    const name = (r.name ?? "Konzern").trim() || "Konzern";
+    const hasDemoSlug = typeof r.demo_slug === "string" && r.demo_slug.trim().length > 0;
+    if (r.is_demo_active === true || r.show_cta === true || hasDemoSlug || looksLikeDemo(name)) {
+      demoTenants.add(r.tenant_id);
+    }
+  }
+
+  const filtered = includeDemo ? list : list.filter((l) => !demoTenants.has(l.company_id));
+  return finishGroups(filtered, nameByTenant, pkByTenant, logoByTenant, brancheByTenant, CACHE_HEADERS);
 }
 
 function finishGroups(

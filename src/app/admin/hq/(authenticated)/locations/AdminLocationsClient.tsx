@@ -34,6 +34,7 @@ export function AdminLocationsClient() {
   const [groups, setGroups] = useState<Group[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [includeDemos, setIncludeDemos] = useState(false);
   const [busyKonzern, setBusyKonzern] = useState(false);
   const [busyStandort, setBusyStandort] = useState(false);
   const [konzernOk, setKonzernOk] = useState<string | null>(null);
@@ -67,7 +68,9 @@ export function AdminLocationsClient() {
     setError(null);
     const [rc, rl] = await Promise.all([
       fetch("/api/companies", { credentials: "include" }),
-      fetch("/api/admin/locations", { credentials: "include" }),
+      fetch(`/api/admin/locations${includeDemos ? "?include_demo=1" : ""}`, {
+        credentials: "include",
+      }),
     ]);
     const pc = (await rc.json()) as {
       error?: string;
@@ -101,7 +104,7 @@ export function AdminLocationsClient() {
           fetch("/api/companies", {
             credentials: "include",
           }),
-          fetch("/api/admin/locations", {
+          fetch(`/api/admin/locations${includeDemos ? "?include_demo=1" : ""}`, {
             credentials: "include",
           }),
         ]);
@@ -136,7 +139,7 @@ export function AdminLocationsClient() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [includeDemos]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -444,6 +447,27 @@ export function AdminLocationsClient() {
         </p>
       ) : null}
 
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <label className="flex items-center gap-2 rounded-md border border-[#1f1f1f] bg-[#0a0a0a] px-3 py-2">
+          <input
+            type="checkbox"
+            checked={includeDemos}
+            onChange={(e) => setIncludeDemos(e.target.checked)}
+          />
+          <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-[#7a7a7a]">
+            Demos anzeigen
+          </span>
+        </label>
+        <button
+          type="button"
+          onClick={() => void reload()}
+          className="inline-flex items-center gap-1.5 rounded-md border border-[#2a2a2a] px-3 py-2 font-mono text-[9px] uppercase tracking-[0.12em] text-[#7a7a7a] hover:border-[#3a3a3a] hover:text-[#9a9a9a]"
+        >
+          <RefreshCw className="size-3" strokeWidth={1.5} />
+          Aktualisieren
+        </button>
+      </div>
+
       <div className="grid gap-8 xl:grid-cols-2 xl:items-start">
         <section className="rounded-lg border border-[#1f1f1f] bg-[#0a0a0a] p-5">
           <div className="mb-4 flex items-center justify-between gap-3 border-b border-[#1f1f1f] pb-3">
@@ -457,14 +481,6 @@ export function AdminLocationsClient() {
                 Standorte nach Konzern
               </h2>
             </div>
-            <button
-              type="button"
-              onClick={() => void reload()}
-              className="inline-flex items-center gap-1.5 rounded-md border border-[#2a2a2a] px-2 py-1 font-mono text-[9px] uppercase tracking-[0.12em] text-[#7a7a7a] hover:border-[#3a3a3a] hover:text-[#9a9a9a]"
-            >
-              <RefreshCw className="size-3" strokeWidth={1.5} />
-              Aktualisieren
-            </button>
           </div>
           {groups.length === 0 ? (
             <p className="font-mono text-[10px] text-[#6b6b6b]">

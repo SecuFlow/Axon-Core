@@ -15,6 +15,7 @@ export default function AdminCustomerViewPickerPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState("");
+  const [includeDemos, setIncludeDemos] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -22,10 +23,13 @@ export default function AdminCustomerViewPickerPage() {
       setLoading(true);
       setError(null);
       try {
-        const resp = await fetch("/api/dashboard/team/companies", {
+        const resp = await fetch(
+          `/api/dashboard/team/companies${includeDemos ? "?include_demo=1" : ""}`,
+          {
           credentials: "include",
           cache: "no-store",
-        });
+          },
+        );
         const payload = (await resp.json()) as {
           companies?: CompanyRow[];
           error?: string;
@@ -53,7 +57,7 @@ export default function AdminCustomerViewPickerPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [includeDemos]);
 
   const selectedName = useMemo(
     () => items.find((i) => i.id === selected)?.name ?? null,
@@ -80,6 +84,16 @@ export default function AdminCustomerViewPickerPage() {
           <p className="font-mono text-xs text-[#6b6b6b]">Keine Mandate gefunden.</p>
         ) : (
           <div className="space-y-4">
+            <label className="flex items-center justify-between gap-3 rounded-xl border border-[#1f1f1f] bg-[#050505]/60 px-3 py-2">
+              <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7a7a7a]">
+                Demos anzeigen
+              </span>
+              <input
+                type="checkbox"
+                checked={includeDemos}
+                onChange={(e) => setIncludeDemos(e.target.checked)}
+              />
+            </label>
             <label className="block">
               <span className="mb-2 block font-mono text-[10px] font-medium uppercase tracking-[0.2em] text-[#7a7a7a]">
                 Mandat auswählen
