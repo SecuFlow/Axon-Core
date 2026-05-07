@@ -313,10 +313,6 @@ export function AdminLocationsClient() {
       setKHqAddress("");
       setKonzernOk("Konzern wurde angelegt.");
       await reload();
-      if (!enterpriseOk) {
-        // UI-only Hinweis: Server lässt nur Pflichtdaten zu, aber Enterprise-Schwellen sind streng.
-        setKonzernOk("Konzern wurde angelegt. Hinweis: Datensatz ist (noch) nicht „Verified Entity“.");
-      }
     } finally {
       setBusyKonzern(false);
     }
