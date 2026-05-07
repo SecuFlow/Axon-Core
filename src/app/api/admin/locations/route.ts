@@ -250,7 +250,7 @@ export async function GET(request: NextRequest) {
 
   const { data: comps, error: cErr } = await ctx.service
     .from("companies")
-    .select("id, tenant_id, name, logo_url, branche, show_cta, demo_slug, is_demo_active");
+    .select("id, tenant_id, name, logo_url, branche, demo_slug, is_demo_active");
 
   if (cErr) {
     if (cErr.message.includes("logo_url") || cErr.message.includes("branche")) {
@@ -329,14 +329,13 @@ export async function GET(request: NextRequest) {
     const r = row as {
       tenant_id?: string;
       name?: string | null;
-      show_cta?: boolean | null;
       demo_slug?: string | null;
       is_demo_active?: boolean | null;
     };
     if (!r.tenant_id) continue;
     const name = (r.name ?? "Konzern").trim() || "Konzern";
     const hasDemoSlug = typeof r.demo_slug === "string" && r.demo_slug.trim().length > 0;
-    if (r.is_demo_active === true || r.show_cta === true || hasDemoSlug || looksLikeDemo(name)) {
+    if (r.is_demo_active === true || hasDemoSlug || looksLikeDemo(name)) {
       demoTenants.add(r.tenant_id);
     }
   }

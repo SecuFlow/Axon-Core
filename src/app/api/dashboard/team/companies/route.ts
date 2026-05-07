@@ -38,7 +38,7 @@ export async function GET(request: Request) {
 
   const { data, error } = await ctx.service
     .from("companies")
-    .select("id, name, tenant_id, demo_slug, is_demo_active, show_cta")
+    .select("id, name, tenant_id, demo_slug, is_demo_active")
     .order("name", { ascending: true });
 
   if (error) {
@@ -85,7 +85,6 @@ export async function GET(request: Request) {
       tenant_id?: string | null;
       demo_slug?: string | null;
       is_demo_active?: boolean | null;
-      show_cta?: boolean | null;
     };
     return {
       id: r.id as string,
@@ -99,20 +98,18 @@ export async function GET(request: Request) {
           : null,
       demo_slug: typeof r.demo_slug === "string" ? r.demo_slug : null,
       is_demo_active: isTruthy(r.is_demo_active),
-      show_cta: isTruthy(r.show_cta),
     };
   });
 
   const companies = includeDemo
-    ? rawCompanies.map(({ demo_slug, is_demo_active, show_cta, ...rest }) => rest)
+    ? rawCompanies.map(({ demo_slug, is_demo_active, ...rest }) => rest)
     : rawCompanies
         .filter((c) => {
           if (c.is_demo_active) return false;
-          if (c.show_cta) return false;
           if (typeof c.demo_slug === "string" && c.demo_slug.trim().length > 0) return false;
           return true;
         })
-        .map(({ demo_slug, is_demo_active, show_cta, ...rest }) => rest);
+        .map(({ demo_slug, is_demo_active, ...rest }) => rest);
 
   return NextResponse.json({ companies });
 }
