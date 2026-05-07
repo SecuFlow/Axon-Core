@@ -13,7 +13,6 @@ function looksLikeDemoCompanyName(raw: string): boolean {
   if (!s) return true;
   if (s.startsWith("demo:")) return true;
   if (/(^|\b)(demo|test|testing|placeholder|sample|beispiel)(\b|$)/i.test(s)) return true;
-  if (/(^|\b)(apple|google|microsoft|amazon|meta|tesla)(\b|$)/i.test(s)) return true;
   return false;
 }
 
@@ -111,7 +110,6 @@ export async function GET(request: Request) {
           if (c.is_demo_active) return false;
           if (c.show_cta) return false;
           if (typeof c.demo_slug === "string" && c.demo_slug.trim().length > 0) return false;
-          if (looksLikeDemoCompanyName(c.name)) return false;
           return true;
         })
         .map(({ demo_slug, is_demo_active, show_cta, ...rest }) => rest);

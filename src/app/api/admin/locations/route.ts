@@ -321,7 +321,6 @@ export async function GET(request: NextRequest) {
     if (!s) return true;
     if (s.startsWith("demo:")) return true;
     if (/(^|\b)(demo|test|testing|placeholder|sample|beispiel)(\b|$)/i.test(s)) return true;
-    if (/(^|\b)(apple|google|microsoft|amazon|meta|tesla)(\b|$)/i.test(s)) return true;
     return false;
   };
 
