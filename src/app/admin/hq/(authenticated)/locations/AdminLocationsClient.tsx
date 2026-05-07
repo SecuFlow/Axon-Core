@@ -534,9 +534,14 @@ export function AdminLocationsClient() {
               aria-hidden
             />
             <h2 className="font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[#c4c4c4]">
-              Neuen Konzern anlegen
+              Neuer Konzern (inkl. erstem Standort)
             </h2>
           </div>
+          <p className="mb-4 font-mono text-[10px] leading-relaxed text-[#6b6b6b]">
+            Dieser Flow legt den Konzern an und erstellt automatisch den ersten
+            Standort (HQ) für denselben Mandanten. Danach kannst du bei Bedarf
+            weitere Standorte hinzufügen.
+          </p>
           <form onSubmit={onKonzern} className="space-y-4">
             <div>
               <label className={labelClass} htmlFor="hq-konzern-name">
@@ -794,9 +799,12 @@ export function AdminLocationsClient() {
               aria-hidden
             />
             <h2 className="font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[#c4c4c4]">
-              Neuen Standort anlegen
+              Zusätzlichen Standort hinzufügen
             </h2>
           </div>
+          <p className="mb-4 font-mono text-[10px] leading-relaxed text-[#6b6b6b]">
+            Für weitere Werke/Standorte innerhalb eines bestehenden Konzerns.
+          </p>
           <form onSubmit={onStandort} className="space-y-4">
             <div>
               <label className={labelClass} htmlFor="hq-standort-konzern">
