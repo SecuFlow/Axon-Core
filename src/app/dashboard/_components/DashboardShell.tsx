@@ -47,9 +47,14 @@ export function DashboardShell({
   const withDemo = useMemo(() => {
     return (path: string) => {
       if (!demoForLinks) return path;
-      const u = new URL(path, window.location.origin);
-      u.searchParams.set("demo", demoForLinks);
-      return `${u.pathname}${u.search}`;
+      // SSR-safe: keine Verwendung von window.location. Wir hängen den `demo`-Param
+      // per String-Manipulation an, weil im Demo-Modus die Middleware
+      // /dashboard/* OHNE Auth durchlässt und SSR die Seite tatsächlich rendert.
+      const [pathOnly, ...rest] = path.split("?");
+      const existing = new URLSearchParams(rest.join("?"));
+      existing.set("demo", demoForLinks);
+      const qs = existing.toString();
+      return qs ? `${pathOnly}?${qs}` : pathOnly;
     };
   }, [demoForLinks]);
   const [brandName, setBrandName] = useState<string | null>(
