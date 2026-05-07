@@ -54,6 +54,7 @@ export function AdminLocationsClient() {
   const [sAddress, setSAddress] = useState("");
   const [sManagerEmail, setSManagerEmail] = useState("");
   const [sManagerName, setSManagerName] = useState("");
+  const [inlineAddTenantId, setInlineAddTenantId] = useState<string | null>(null);
   const [deletingLocationId, setDeletingLocationId] = useState<string | null>(
     null,
   );
@@ -349,6 +350,7 @@ export function AdminLocationsClient() {
       setSManagerEmail("");
       setSManagerName("");
       setStandortOk("Standort wurde angelegt.");
+      setInlineAddTenantId(null);
       await reload();
       if (typeof p.manager_checkout_url === "string" && p.manager_checkout_url.trim()) {
         window.location.href = p.manager_checkout_url;
@@ -785,137 +787,151 @@ export function AdminLocationsClient() {
                       </li>
                     ))}
                   </ul>
+
+                  {(() => {
+                    const companyPk =
+                      companies.find((c) => c.tenant_id === g.company_id)?.id ?? "";
+                    const isOpen = inlineAddTenantId === g.company_id;
+                    return (
+                      <div className="mt-4 border-t border-[#1a1a1a] pt-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="font-mono text-[9px] uppercase tracking-[0.16em] text-[#5a5a5a]">
+                            Standort hinzufügen
+                          </p>
+                          <button
+                            type="button"
+                            className="rounded-md border border-[#2a2a2a] bg-[#0f0f0f] px-3 py-1.5 font-mono text-[9px] font-semibold uppercase tracking-[0.14em] text-[#9a9a9a] transition hover:border-[#3a3a3a] hover:text-[#d4d4d4]"
+                            onClick={() => {
+                              setStandortErr(null);
+                              setStandortOk(null);
+                              if (!companyPk) return;
+                              setSCompanyId(companyPk);
+                              setSName("");
+                              setSAddress("");
+                              setSManagerEmail("");
+                              setSManagerName("");
+                              setInlineAddTenantId((prev) =>
+                                prev === g.company_id ? null : g.company_id,
+                              );
+                            }}
+                            disabled={!companyPk}
+                            title={
+                              companyPk
+                                ? "Neuen Standort für diesen Konzern anlegen"
+                                : "Konzern-PK konnte nicht aufgelöst werden"
+                            }
+                          >
+                            + Standort
+                          </button>
+                        </div>
+
+                        {!companyPk ? (
+                          <p className="mt-2 font-mono text-[10px] text-red-400/80">
+                            Hinweis: Dieser Konzern kann nicht ausgewählt werden (fehlende Zuordnung von tenant_id → companies.id).
+                          </p>
+                        ) : null}
+
+                        {isOpen ? (
+                          <form onSubmit={onStandort} className="mt-3 space-y-3">
+                            <div>
+                              <label className={labelClass} htmlFor={`hq-inline-standort-name-${g.company_id}`}>
+                                Standort-Name
+                              </label>
+                              <input
+                                id={`hq-inline-standort-name-${g.company_id}`}
+                                value={sName}
+                                onChange={(e) => setSName(e.target.value)}
+                                className={inputClass}
+                                placeholder="z. B. Werk Nord"
+                                required
+                                disabled={busyStandort}
+                              />
+                            </div>
+                            <div>
+                              <label className={labelClass} htmlFor={`hq-inline-standort-addr-${g.company_id}`}>
+                                Adresse
+                              </label>
+                              <textarea
+                                id={`hq-inline-standort-addr-${g.company_id}`}
+                                value={sAddress}
+                                onChange={(e) => setSAddress(e.target.value)}
+                                rows={2}
+                                className={inputClass}
+                                placeholder="Straße, PLZ Ort"
+                                disabled={busyStandort}
+                              />
+                            </div>
+                            <div className="grid gap-4 md:grid-cols-2">
+                              <div>
+                                <label className={labelClass} htmlFor={`hq-inline-standort-manager-name-${g.company_id}`}>
+                                  Manager Name (neu)
+                                </label>
+                                <input
+                                  id={`hq-inline-standort-manager-name-${g.company_id}`}
+                                  value={sManagerName}
+                                  onChange={(e) => setSManagerName(e.target.value)}
+                                  className={inputClass}
+                                  placeholder="z. B. Anna Leitner"
+                                  disabled={busyStandort}
+                                />
+                              </div>
+                              <div>
+                                <label className={labelClass} htmlFor={`hq-inline-standort-manager-email-${g.company_id}`}>
+                                  Manager E-Mail (für Auto-Account)
+                                </label>
+                                <input
+                                  id={`hq-inline-standort-manager-email-${g.company_id}`}
+                                  value={sManagerEmail}
+                                  onChange={(e) => setSManagerEmail(e.target.value)}
+                                  className={inputClass}
+                                  placeholder="manager@firma.de"
+                                  type="email"
+                                  disabled={busyStandort}
+                                />
+                              </div>
+                            </div>
+
+                            {standortErr ? (
+                              <p className="font-mono text-[10px] text-red-400/90">
+                                {standortErr}
+                              </p>
+                            ) : null}
+                            {provisioningHint ? (
+                              <p className="font-mono text-[10px] text-amber-300/90">
+                                {provisioningHint}
+                              </p>
+                            ) : null}
+                            {standortOk ? (
+                              <p className="font-mono text-[10px] text-emerald-400/90">
+                                {standortOk}
+                              </p>
+                            ) : null}
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="submit"
+                                disabled={busyStandort || !sName.trim() || !sCompanyId}
+                                className="rounded-md border border-[#c9a962]/35 bg-[#c9a962]/10 px-4 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-[#d4c896] transition hover:bg-[#c9a962]/15 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {busyStandort ? "Wird gespeichert…" : "Standort speichern"}
+                              </button>
+                              <button
+                                type="button"
+                                disabled={busyStandort}
+                                onClick={() => setInlineAddTenantId(null)}
+                                className="rounded-md border border-[#2a2a2a] bg-[#0f0f0f] px-4 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8a8a8a] transition hover:border-[#3a3a3a] hover:text-[#c8c8c8] disabled:opacity-50"
+                              >
+                                Abbrechen
+                              </button>
+                            </div>
+                          </form>
+                        ) : null}
+                      </div>
+                    );
+                  })()}
                 </div>
               ))}
             </div>
           )}
-        </section>
-
-        <section className="rounded-lg border border-[#1f1f1f] bg-[#0a0a0a] p-5">
-          <div className="mb-4 flex items-center gap-2 border-b border-[#1f1f1f] pb-3">
-            <MapPin
-              className="size-4 text-[#c9a962]/80"
-              strokeWidth={1.5}
-              aria-hidden
-            />
-            <h2 className="font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[#c4c4c4]">
-              Zusätzlichen Standort hinzufügen
-            </h2>
-          </div>
-          <p className="mb-4 font-mono text-[10px] leading-relaxed text-[#6b6b6b]">
-            Für weitere Werke/Standorte innerhalb eines bestehenden Konzerns.
-          </p>
-          <form onSubmit={onStandort} className="space-y-4">
-            <div>
-              <label className={labelClass} htmlFor="hq-standort-konzern">
-                Konzern
-              </label>
-              <select
-                id="hq-standort-konzern"
-                value={sCompanyId}
-                onChange={(e) => setSCompanyId(e.target.value)}
-                className={inputClass}
-                required
-              >
-                {companies.length === 0 ? (
-                  <option value="">— zuerst Konzern anlegen —</option>
-                ) : (
-                  companies.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))
-                )}
-              </select>
-            </div>
-            <div>
-              <label className={labelClass} htmlFor="hq-standort-name">
-                Standort-Name
-              </label>
-              <input
-                id="hq-standort-name"
-                value={sName}
-                onChange={(e) => setSName(e.target.value)}
-                className={inputClass}
-                placeholder="z. B. Werk Nord"
-                required
-              />
-            </div>
-            <div>
-              <label className={labelClass} htmlFor="hq-standort-addr">
-                Adresse
-              </label>
-              <textarea
-                id="hq-standort-addr"
-                value={sAddress}
-                onChange={(e) => setSAddress(e.target.value)}
-                rows={3}
-                className={inputClass}
-                placeholder="Straße, PLZ Ort"
-              />
-            </div>
-            <div className="grid gap-4 md:grid-cols-2">
-              <div>
-                <label className={labelClass} htmlFor="hq-standort-manager-name">
-                  Manager Name (neu)
-                </label>
-                <input
-                  id="hq-standort-manager-name"
-                  value={sManagerName}
-                  onChange={(e) => setSManagerName(e.target.value)}
-                  className={inputClass}
-                  placeholder="z. B. Anna Leitner"
-                />
-              </div>
-              <div>
-                <label className={labelClass} htmlFor="hq-standort-manager-email">
-                  Manager E-Mail (für Auto-Account)
-                </label>
-                <input
-                  id="hq-standort-manager-email"
-                  value={sManagerEmail}
-                  onChange={(e) => setSManagerEmail(e.target.value)}
-                  className={inputClass}
-                  placeholder="manager@firma.de"
-                  type="email"
-                />
-              </div>
-            </div>
-            {standortErr ? (
-              <p className="font-mono text-[10px] text-red-400/90">
-                {standortErr}
-              </p>
-            ) : null}
-            {provisioningHint ? (
-              <p className="font-mono text-[10px] text-amber-300/90">
-                {provisioningHint}
-              </p>
-            ) : null}
-            {standortOk ? (
-              <p className="font-mono text-[10px] text-emerald-400/90">
-                {standortOk}
-              </p>
-            ) : null}
-            <button
-              type="submit"
-              disabled={
-                busyStandort ||
-                !sCompanyId ||
-                !sName.trim() ||
-                companies.length === 0
-              }
-              className="w-full rounded-md border border-[#c9a962]/35 bg-[#c9a962]/10 py-2.5 font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-[#d4c896] transition hover:bg-[#c9a962]/15 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {busyStandort ? "Wird gespeichert…" : "Standort speichern"}
-            </button>
-            <p className="font-mono text-[9px] leading-relaxed text-[#4a4a4a]">
-              Auswahl per <code className="text-[#6a6a6a]">companies.id</code>;
-              die API setzt{" "}
-              <code className="text-[#6a6a6a]">locations.company_id</code> auf
-              die zugehörige Mandanten-
-              <code className="text-[#6a6a6a]">tenant_id</code>.
-            </p>
-          </form>
         </section>
       </div>
     </div>
