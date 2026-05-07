@@ -99,8 +99,13 @@ function resolveDemoBaseUrl(overrideBaseUrl?: string | null): string {
   if (override) return override;
   const explicit = process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/$/, "");
   if (explicit) return explicit;
-  // Fallback exakt wie gewünscht
-  return "https://deine-app.vercel.app";
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL?.trim().replace(/\/$/, "");
+  if (appUrl) return appUrl;
+  const vercel = process.env.VERCEL_URL?.trim();
+  if (vercel) return `https://${vercel}`;
+  // Letzter Fallback (erkennbar als Konfigurations-Hinweis statt stiller
+  // Falsch-URL): bricht Demo-Links auf, statt User auf eine fremde Domain zu schicken.
+  return "https://example.invalid";
 }
 
 export type GenerateAutomatedDemoResult = {

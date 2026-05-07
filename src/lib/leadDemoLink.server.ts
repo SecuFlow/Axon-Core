@@ -6,12 +6,21 @@ function sanitizeEnv(value: string | undefined) {
 }
 
 export function getPublicSiteUrlFromEnv(): string | null {
-  const base =
+  // Reihenfolge:
+  //   1) NEXT_PUBLIC_SITE_URL (explizit gepflegte Production-Domain)
+  //   2) NEXT_PUBLIC_APP_URL  (Legacy-Alias)
+  //   3) VERCEL_URL           (von Vercel automatisch gesetzt, ohne Schema)
+  //
+  // Der VERCEL_URL-Fallback verhindert, dass Demo-Mails ohne Links rausgehen,
+  // falls das produktive Site-URL-ENV einmal nicht gesetzt ist.
+  const explicit =
     sanitizeEnv(process.env.NEXT_PUBLIC_SITE_URL) ??
     sanitizeEnv(process.env.NEXT_PUBLIC_APP_URL);
-  if (!base) return null;
+  const vercel = sanitizeEnv(process.env.VERCEL_URL);
+  const candidate = explicit ?? (vercel ? `https://${vercel}` : null);
+  if (!candidate) return null;
   try {
-    return new URL(base).toString().replace(/\/+$/g, "");
+    return new URL(candidate).toString().replace(/\/+$/g, "");
   } catch {
     return null;
   }
