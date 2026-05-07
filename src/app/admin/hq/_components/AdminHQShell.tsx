@@ -3,25 +3,36 @@
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { LayoutGroup, motion } from "framer-motion";
 import { MonitorSmartphone, LogOut } from "lucide-react";
 import { DEFAULT_LOGO_PUBLIC_PATH } from "@/lib/brandingDisplay";
 
-const nav = [
+type NavEntry = {
+  href: string;
+  label: string;
+  exact: boolean;
+  /** Tab ist aktiv, wenn pathname dem href (ohne Query) entspricht und alle Query-Werte matchen */
+  searchMatch?: Record<string, string>;
+};
+
+const nav: NavEntry[] = [
   { href: "/admin/hq/leadmaschine", label: "Leadmaschine", exact: true },
-  { href: "/admin/hq/sicherheit", label: "Sicherheit", exact: true },
-  { href: "/admin/hq", label: "AxonCoin", exact: true },
+  {
+    href: "/coming-soon?product=axoncoin",
+    label: "AxonCoin",
+    exact: true,
+    searchMatch: { product: "axoncoin" },
+  },
   { href: "/admin/hq/kpi", label: "KPI Zentrale", exact: false },
-  { href: "/admin/hq/demo", label: "Demo-Center", exact: true },
-  { href: "/admin/hq/system", label: "System-Einspeisung", exact: false },
-  { href: "/admin/hq/sekretaer", label: "Axon‑Sekretär", exact: true },
+  { href: "/admin/hq/pilot-ops", label: "Pilot-Ops", exact: true },
   { href: "/admin/hq/locations", label: "Standorte", exact: true },
   { href: "/admin/hq/users", label: "Team", exact: true },
-] as const;
+];
 
 export function AdminHQShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [mounted, setMounted] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
 
@@ -29,16 +40,19 @@ export function AdminHQShell({ children }: { children: ReactNode }) {
     setMounted(true);
   }, []);
 
-  const isActive = (href: string, exact?: boolean) => {
+  const isTabActive = (t: NavEntry) => {
     if (!mounted) return false;
-    if (exact) return pathname === href;
-    return pathname === href || pathname.startsWith(`${href}/`);
+    if (t.searchMatch) {
+      const path = t.href.split("?")[0] ?? t.href;
+      if (pathname !== path) return false;
+      for (const [k, v] of Object.entries(t.searchMatch)) {
+        if (searchParams.get(k) !== v) return false;
+      }
+      return true;
+    }
+    if (t.exact) return pathname === t.href;
+    return pathname === t.href || pathname.startsWith(`${t.href}/`);
   };
-
-  const tabs = nav.filter((n) => {
-    if (!n.href.startsWith("/admin/hq")) return false;
-    return true;
-  });
 
   const onLogout = async () => {
     if (loggingOut) return;
@@ -99,8 +113,8 @@ export function AdminHQShell({ children }: { children: ReactNode }) {
         <div className="w-full px-4 py-3 md:px-8">
           <LayoutGroup id="hq-header-tabs">
             <nav className="flex w-full gap-2 overflow-x-auto [-webkit-overflow-scrolling:touch] pb-0.5">
-              {tabs.map((t) => {
-                const active = isActive(t.href, t.exact);
+              {nav.map((t) => {
+                const active = isTabActive(t);
                 return (
                   <Link
                     key={t.href}
