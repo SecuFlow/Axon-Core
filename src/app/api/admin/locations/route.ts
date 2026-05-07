@@ -246,37 +246,41 @@ export async function GET(request: NextRequest) {
 
   const { data: comps, error: cErr } = await ctx.service
     .from("companies")
-    .select("tenant_id, name, logo_url, branche, show_cta, demo_slug, is_demo_active");
+    .select("id, tenant_id, name, logo_url, branche, show_cta, demo_slug, is_demo_active");
 
   if (cErr) {
     if (cErr.message.includes("logo_url") || cErr.message.includes("branche")) {
       const fb = await ctx.service
         .from("companies")
-        .select("tenant_id, name");
+        .select("id, tenant_id, name");
       if (fb.error) {
         return NextResponse.json({ error: fb.error.message }, { status: 500, headers: CACHE_HEADERS });
       }
       const nameByTenant = new Map<string, string>();
+      const pkByTenant = new Map<string, string>();
       for (const row of fb.data ?? []) {
-        const r = row as { tenant_id?: string; name?: string | null };
-        if (r.tenant_id && !nameByTenant.has(r.tenant_id)) {
-          nameByTenant.set(
-            r.tenant_id,
-            (r.name ?? "Konzern").trim() || "Konzern",
-          );
+        const r = row as { id?: string; tenant_id?: string; name?: string | null };
+        if (typeof r.tenant_id !== "string" || !r.tenant_id) continue;
+        if (!nameByTenant.has(r.tenant_id)) {
+          nameByTenant.set(r.tenant_id, (r.name ?? "Konzern").trim() || "Konzern");
+        }
+        if (typeof r.id === "string" && r.id && !pkByTenant.has(r.tenant_id)) {
+          pkByTenant.set(r.tenant_id, r.id);
         }
       }
-      return finishGroups(list, nameByTenant, new Map(), new Map(), CACHE_HEADERS);
+      return finishGroups(list, nameByTenant, pkByTenant, new Map(), new Map(), CACHE_HEADERS);
     }
     return NextResponse.json({ error: cErr.message }, { status: 500, headers: CACHE_HEADERS });
   }
 
   const nameByTenant = new Map<string, string>();
+  const pkByTenant = new Map<string, string>();
   const logoByTenant = new Map<string, string | null>();
   const brancheByTenant = new Map<string, string | null>();
 
   for (const row of comps ?? []) {
     const r = row as {
+      id?: string;
       tenant_id?: string;
       name?: string | null;
       logo_url?: string | null;
@@ -303,11 +307,14 @@ export async function GET(request: NextRequest) {
           : null,
       );
     }
+    if (typeof r.id === "string" && r.id && !pkByTenant.has(r.tenant_id)) {
+      pkByTenant.set(r.tenant_id, r.id);
+    }
   }
 
   // Keine Enterprise-/Demo-Filter im Admin-HQ: es ist eine interne Verwaltung und soll
   // exakt die Standorte abbilden, die im Konzern-Dashboard sichtbar sind.
-  return finishGroups(list, nameByTenant, logoByTenant, brancheByTenant, CACHE_HEADERS);
+  return finishGroups(list, nameByTenant, pkByTenant, logoByTenant, brancheByTenant, CACHE_HEADERS);
 }
 
 function finishGroups(
@@ -319,6 +326,7 @@ function finishGroups(
     address: string | null;
   }>,
   nameByTenant: Map<string, string>,
+  pkByTenant: Map<string, string>,
   logoByTenant: Map<string, string | null>,
   brancheByTenant: Map<string, string | null>,
   headers?: Record<string, string>,
@@ -327,6 +335,7 @@ function finishGroups(
   const groups = new Map<
     string,
     {
+      company_pk: string | null;
       company_id: string;
       company_name: string;
       logo_url: string | null;
@@ -337,6 +346,7 @@ function finishGroups(
 
   for (const loc of list) {
     const g = groups.get(loc.company_id) ?? {
+      company_pk: pkByTenant.get(loc.company_id) ?? null,
       company_id: loc.company_id,
       company_name: nameByTenant.get(loc.company_id) ?? "Unbekannt",
       logo_url: logoByTenant.get(loc.company_id) ?? null,

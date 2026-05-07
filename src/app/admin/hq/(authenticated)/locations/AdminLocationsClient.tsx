@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import { Building2, Factory, MapPin, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
+import { Factory, MapPin, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 
 type CompanyOption = {
   id: string;
@@ -21,6 +21,7 @@ type Loc = {
 };
 
 type Group = {
+  company_pk: string | null;
   company_id: string;
   company_name: string;
   logo_url: string | null;
@@ -447,13 +448,13 @@ export function AdminLocationsClient() {
         <section className="rounded-lg border border-[#1f1f1f] bg-[#0a0a0a] p-5">
           <div className="mb-4 flex items-center justify-between gap-3 border-b border-[#1f1f1f] pb-3">
             <div className="flex items-center gap-2">
-              <Building2
+              <MapPin
                 className="size-4 text-[#c9a962]/80"
                 strokeWidth={1.5}
                 aria-hidden
               />
               <h2 className="font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[#c4c4c4]">
-                Alle Konzerne
+                Standorte nach Konzern
               </h2>
             </div>
             <button
@@ -465,66 +466,218 @@ export function AdminLocationsClient() {
               Aktualisieren
             </button>
           </div>
-          {companies.length === 0 ? (
+          {groups.length === 0 ? (
             <p className="font-mono text-[10px] text-[#6b6b6b]">
-              Keine Enterprise-Konzerne vorhanden.
+              Keine Standorte erfasst.
             </p>
           ) : (
-            <ul className="max-h-[min(28rem,55vh)] space-y-3 overflow-y-auto pr-1">
-              {companies.map((c) => (
-                <li
-                  key={c.id}
-                  className="rounded-md border border-[#1a1a1a] bg-[#080808] p-3"
+            <div className="max-h-[min(44rem,70vh)] space-y-6 overflow-y-auto pr-1">
+              {groups.map((g) => (
+                <div
+                  key={g.company_id}
+                  className="rounded-md border border-[#1a1a1a] bg-[#080808] p-4"
                 >
-                  <div className="flex items-start gap-3">
-                    {c.logo_url ? (
+                  <div className="mb-3 flex flex-wrap items-center gap-2 border-b border-[#1a1a1a] pb-2">
+                    {g.logo_url ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
-                        src={c.logo_url}
+                        src={g.logo_url}
                         alt=""
-                        className="size-10 shrink-0 rounded border border-[#262626] bg-[#111] object-contain"
+                        className="size-8 rounded border border-[#262626] object-contain"
                       />
                     ) : (
-                      <div className="relative flex size-10 shrink-0 items-center justify-center overflow-hidden rounded border border-[#2a2a2a] bg-[#0b0b0b]">
+                      <div className="relative flex size-8 items-center justify-center overflow-hidden rounded border border-[#2a2a2a] bg-[#0b0b0b]">
                         <div className="absolute inset-0 opacity-70 [background:radial-gradient(60%_60%_at_50%_40%,rgba(201,169,98,0.28),transparent_70%)]" />
-                        <span className="relative font-mono text-[10px] font-semibold tracking-[0.18em] text-[#d4c896]">
+                        <span className="relative font-mono text-[9px] font-semibold tracking-[0.18em] text-[#d4c896]">
                           AX
                         </span>
                       </div>
                     )}
-                    <div className="min-w-0 flex-1 pr-1">
-                      <p className="truncate font-mono text-[12px] font-medium text-[#e4e4e4]">
-                        {c.name}
-                      </p>
-                      {c.branche ? (
-                        <p className="mt-0.5 font-mono text-[10px] text-[#7a7a7a]">
-                          {c.branche}
+                    <div className="min-w-0">
+                      <h3 className="truncate font-mono text-[11px] font-medium text-[#d4d4d4]">
+                        {g.company_name}
+                      </h3>
+                      {g.branche ? (
+                        <p className="font-mono text-[9px] text-[#6b6b6b]">
+                          {g.branche}
                         </p>
                       ) : null}
-                      {c.manager_verknuepft ? (
-                        <span className="mt-2 inline-block rounded border border-[#2a2a2a] bg-[#0f0f0f] px-2 py-0.5 font-mono text-[8px] uppercase tracking-wider text-[#9a9a9a]">
-                          Verifiziert
-                        </span>
-                      ) : (
-                        <span className="mt-2 inline-block rounded border border-[#333] bg-[#141414] px-2 py-0.5 font-mono text-[8px] uppercase tracking-wider text-[#8a8a8a]">
-                          Nicht verifiziert
-                        </span>
-                      )}
                     </div>
-                    <button
-                      type="button"
-                      className={trashBtnClass}
-                      disabled={deletingCompanyId === c.id}
-                      title="Konzern löschen"
-                      aria-label={`Konzern ${c.name} löschen`}
-                      onClick={() => void deleteCompany(c)}
-                    >
-                      <Trash2 className="size-4" strokeWidth={1.5} />
-                    </button>
                   </div>
-                </li>
+
+                  <ul className="space-y-2">
+                    {g.locations.map((loc) => (
+                      <li
+                        key={loc.id}
+                        className="flex items-start gap-2 rounded border border-[#141414] bg-[#050505] px-3 py-2"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="font-mono text-[11px] text-[#c8c8c8]">
+                            {loc.name}
+                          </p>
+                          {loc.address ? (
+                            <p className="mt-1 whitespace-pre-wrap font-mono text-[10px] text-[#6b6b6b]">
+                              {loc.address}
+                            </p>
+                          ) : null}
+                        </div>
+                        <button
+                          type="button"
+                          className={trashBtnClass}
+                          disabled={deletingLocationId === loc.id}
+                          title="Standort löschen"
+                          aria-label={`Standort ${loc.name} löschen`}
+                          onClick={() => void deleteLocation(loc)}
+                        >
+                          <Trash2 className="size-4" strokeWidth={1.5} />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+
+                  {(() => {
+                    const companyPk = g.company_pk ?? "";
+                    const isOpen = inlineAddTenantId === g.company_id;
+                    return (
+                      <div className="mt-4 border-t border-[#1a1a1a] pt-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="font-mono text-[9px] uppercase tracking-[0.16em] text-[#5a5a5a]">
+                            Standort hinzufügen
+                          </p>
+                          <button
+                            type="button"
+                            className="rounded-md border border-[#2a2a2a] bg-[#0f0f0f] px-3 py-1.5 font-mono text-[9px] font-semibold uppercase tracking-[0.14em] text-[#9a9a9a] transition hover:border-[#3a3a3a] hover:text-[#d4d4d4] disabled:cursor-not-allowed disabled:opacity-40"
+                            onClick={() => {
+                              setStandortErr(null);
+                              setStandortOk(null);
+                              if (!companyPk) return;
+                              setSCompanyId(companyPk);
+                              setSName("");
+                              setSAddress("");
+                              setSManagerEmail("");
+                              setSManagerName("");
+                              setInlineAddTenantId((prev) =>
+                                prev === g.company_id ? null : g.company_id,
+                              );
+                            }}
+                            disabled={!companyPk}
+                          >
+                            + Standort
+                          </button>
+                        </div>
+
+                        {isOpen ? (
+                          <form onSubmit={onStandort} className="mt-3 space-y-3">
+                            <div>
+                              <label
+                                className={labelClass}
+                                htmlFor={`hq-inline-standort-name-${g.company_id}`}
+                              >
+                                Standort-Name
+                              </label>
+                              <input
+                                id={`hq-inline-standort-name-${g.company_id}`}
+                                value={sName}
+                                onChange={(e) => setSName(e.target.value)}
+                                className={inputClass}
+                                placeholder="z. B. Werk Nord"
+                                required
+                                disabled={busyStandort}
+                              />
+                            </div>
+                            <div>
+                              <label
+                                className={labelClass}
+                                htmlFor={`hq-inline-standort-addr-${g.company_id}`}
+                              >
+                                Adresse
+                              </label>
+                              <textarea
+                                id={`hq-inline-standort-addr-${g.company_id}`}
+                                value={sAddress}
+                                onChange={(e) => setSAddress(e.target.value)}
+                                rows={2}
+                                className={inputClass}
+                                placeholder="Straße, PLZ Ort"
+                                disabled={busyStandort}
+                              />
+                            </div>
+                            <div className="grid gap-4 md:grid-cols-2">
+                              <div>
+                                <label
+                                  className={labelClass}
+                                  htmlFor={`hq-inline-standort-manager-name-${g.company_id}`}
+                                >
+                                  Manager Name (neu)
+                                </label>
+                                <input
+                                  id={`hq-inline-standort-manager-name-${g.company_id}`}
+                                  value={sManagerName}
+                                  onChange={(e) => setSManagerName(e.target.value)}
+                                  className={inputClass}
+                                  placeholder="z. B. Anna Leitner"
+                                  disabled={busyStandort}
+                                />
+                              </div>
+                              <div>
+                                <label
+                                  className={labelClass}
+                                  htmlFor={`hq-inline-standort-manager-email-${g.company_id}`}
+                                >
+                                  Manager E-Mail (für Auto-Account)
+                                </label>
+                                <input
+                                  id={`hq-inline-standort-manager-email-${g.company_id}`}
+                                  value={sManagerEmail}
+                                  onChange={(e) => setSManagerEmail(e.target.value)}
+                                  className={inputClass}
+                                  placeholder="manager@firma.de"
+                                  type="email"
+                                  disabled={busyStandort}
+                                />
+                              </div>
+                            </div>
+
+                            {standortErr ? (
+                              <p className="font-mono text-[10px] text-red-400/90">
+                                {standortErr}
+                              </p>
+                            ) : null}
+                            {provisioningHint ? (
+                              <p className="font-mono text-[10px] text-amber-300/90">
+                                {provisioningHint}
+                              </p>
+                            ) : null}
+                            {standortOk ? (
+                              <p className="font-mono text-[10px] text-emerald-400/90">
+                                {standortOk}
+                              </p>
+                            ) : null}
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="submit"
+                                disabled={busyStandort || !sName.trim() || !sCompanyId}
+                                className="rounded-md border border-[#c9a962]/35 bg-[#c9a962]/10 px-4 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-[#d4c896] transition hover:bg-[#c9a962]/15 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {busyStandort ? "Wird gespeichert…" : "Standort speichern"}
+                              </button>
+                              <button
+                                type="button"
+                                disabled={busyStandort}
+                                onClick={() => setInlineAddTenantId(null)}
+                                className="rounded-md border border-[#2a2a2a] bg-[#0f0f0f] px-4 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8a8a8a] transition hover:border-[#3a3a3a] hover:text-[#c8c8c8] disabled:opacity-50"
+                              >
+                                Abbrechen
+                              </button>
+                            </div>
+                          </form>
+                        ) : null}
+                      </div>
+                    );
+                  })()}
+                </div>
               ))}
-            </ul>
+            </div>
           )}
         </section>
 
@@ -705,233 +858,6 @@ export function AdminLocationsClient() {
               Fokus auf Geschäftsdaten: Segment, Umsatz und HQ-Location werden als Grundlage für Enterprise-Qualität genutzt.
             </p>
           </form>
-        </section>
-      </div>
-
-      <div className="grid gap-8 xl:grid-cols-2 xl:items-start">
-        <section className="rounded-lg border border-[#1f1f1f] bg-[#0a0a0a] p-5">
-          <div className="mb-4 flex items-center gap-2 border-b border-[#1f1f1f] pb-3">
-            <MapPin
-              className="size-4 text-[#c9a962]/80"
-              strokeWidth={1.5}
-              aria-hidden
-            />
-            <h2 className="font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[#c4c4c4]">
-              Standorte nach Konzern
-            </h2>
-          </div>
-          {groups.length === 0 ? (
-            <p className="font-mono text-[10px] text-[#6b6b6b]">
-              Keine Standorte erfasst.
-            </p>
-          ) : (
-            <div className="max-h-[min(32rem,60vh)] space-y-6 overflow-y-auto pr-1">
-              {groups.map((g) => (
-                <div
-                  key={g.company_id}
-                  className="rounded-md border border-[#1a1a1a] bg-[#080808] p-4"
-                >
-                  <div className="mb-3 flex flex-wrap items-center gap-2 border-b border-[#1a1a1a] pb-2">
-                    {g.logo_url ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={g.logo_url}
-                        alt=""
-                        className="size-8 rounded border border-[#262626] object-contain"
-                      />
-                    ) : (
-                      <div className="relative flex size-8 items-center justify-center overflow-hidden rounded border border-[#2a2a2a] bg-[#0b0b0b]">
-                        <div className="absolute inset-0 opacity-70 [background:radial-gradient(60%_60%_at_50%_40%,rgba(201,169,98,0.28),transparent_70%)]" />
-                        <span className="relative font-mono text-[9px] font-semibold tracking-[0.18em] text-[#d4c896]">
-                          AX
-                        </span>
-                      </div>
-                    )}
-                    <div>
-                      <h3 className="font-mono text-[11px] font-medium text-[#d4d4d4]">
-                        {g.company_name}
-                      </h3>
-                      {g.branche ? (
-                        <p className="font-mono text-[9px] text-[#6b6b6b]">
-                          {g.branche}
-                        </p>
-                      ) : null}
-                    </div>
-                  </div>
-                  <ul className="space-y-2">
-                    {g.locations.map((loc) => (
-                      <li
-                        key={loc.id}
-                        className="flex items-start gap-2 rounded border border-[#141414] bg-[#050505] px-3 py-2"
-                      >
-                        <div className="min-w-0 flex-1">
-                          <p className="font-mono text-[11px] text-[#c8c8c8]">
-                            {loc.name}
-                          </p>
-                          {loc.address ? (
-                            <p className="mt-1 whitespace-pre-wrap font-mono text-[10px] text-[#6b6b6b]">
-                              {loc.address}
-                            </p>
-                          ) : null}
-                        </div>
-                        <button
-                          type="button"
-                          className={trashBtnClass}
-                          disabled={deletingLocationId === loc.id}
-                          title="Standort löschen"
-                          aria-label={`Standort ${loc.name} löschen`}
-                          onClick={() => void deleteLocation(loc)}
-                        >
-                          <Trash2 className="size-4" strokeWidth={1.5} />
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-
-                  {(() => {
-                    const companyPk =
-                      companies.find((c) => c.tenant_id === g.company_id)?.id ?? "";
-                    const isOpen = inlineAddTenantId === g.company_id;
-                    return (
-                      <div className="mt-4 border-t border-[#1a1a1a] pt-3">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <p className="font-mono text-[9px] uppercase tracking-[0.16em] text-[#5a5a5a]">
-                            Standort hinzufügen
-                          </p>
-                          <button
-                            type="button"
-                            className="rounded-md border border-[#2a2a2a] bg-[#0f0f0f] px-3 py-1.5 font-mono text-[9px] font-semibold uppercase tracking-[0.14em] text-[#9a9a9a] transition hover:border-[#3a3a3a] hover:text-[#d4d4d4]"
-                            onClick={() => {
-                              setStandortErr(null);
-                              setStandortOk(null);
-                              if (!companyPk) return;
-                              setSCompanyId(companyPk);
-                              setSName("");
-                              setSAddress("");
-                              setSManagerEmail("");
-                              setSManagerName("");
-                              setInlineAddTenantId((prev) =>
-                                prev === g.company_id ? null : g.company_id,
-                              );
-                            }}
-                            disabled={!companyPk}
-                            title={
-                              companyPk
-                                ? "Neuen Standort für diesen Konzern anlegen"
-                                : "Konzern-PK konnte nicht aufgelöst werden"
-                            }
-                          >
-                            + Standort
-                          </button>
-                        </div>
-
-                        {!companyPk ? (
-                          <p className="mt-2 font-mono text-[10px] text-red-400/80">
-                            Hinweis: Dieser Konzern kann nicht ausgewählt werden (fehlende Zuordnung von tenant_id → companies.id).
-                          </p>
-                        ) : null}
-
-                        {isOpen ? (
-                          <form onSubmit={onStandort} className="mt-3 space-y-3">
-                            <div>
-                              <label className={labelClass} htmlFor={`hq-inline-standort-name-${g.company_id}`}>
-                                Standort-Name
-                              </label>
-                              <input
-                                id={`hq-inline-standort-name-${g.company_id}`}
-                                value={sName}
-                                onChange={(e) => setSName(e.target.value)}
-                                className={inputClass}
-                                placeholder="z. B. Werk Nord"
-                                required
-                                disabled={busyStandort}
-                              />
-                            </div>
-                            <div>
-                              <label className={labelClass} htmlFor={`hq-inline-standort-addr-${g.company_id}`}>
-                                Adresse
-                              </label>
-                              <textarea
-                                id={`hq-inline-standort-addr-${g.company_id}`}
-                                value={sAddress}
-                                onChange={(e) => setSAddress(e.target.value)}
-                                rows={2}
-                                className={inputClass}
-                                placeholder="Straße, PLZ Ort"
-                                disabled={busyStandort}
-                              />
-                            </div>
-                            <div className="grid gap-4 md:grid-cols-2">
-                              <div>
-                                <label className={labelClass} htmlFor={`hq-inline-standort-manager-name-${g.company_id}`}>
-                                  Manager Name (neu)
-                                </label>
-                                <input
-                                  id={`hq-inline-standort-manager-name-${g.company_id}`}
-                                  value={sManagerName}
-                                  onChange={(e) => setSManagerName(e.target.value)}
-                                  className={inputClass}
-                                  placeholder="z. B. Anna Leitner"
-                                  disabled={busyStandort}
-                                />
-                              </div>
-                              <div>
-                                <label className={labelClass} htmlFor={`hq-inline-standort-manager-email-${g.company_id}`}>
-                                  Manager E-Mail (für Auto-Account)
-                                </label>
-                                <input
-                                  id={`hq-inline-standort-manager-email-${g.company_id}`}
-                                  value={sManagerEmail}
-                                  onChange={(e) => setSManagerEmail(e.target.value)}
-                                  className={inputClass}
-                                  placeholder="manager@firma.de"
-                                  type="email"
-                                  disabled={busyStandort}
-                                />
-                              </div>
-                            </div>
-
-                            {standortErr ? (
-                              <p className="font-mono text-[10px] text-red-400/90">
-                                {standortErr}
-                              </p>
-                            ) : null}
-                            {provisioningHint ? (
-                              <p className="font-mono text-[10px] text-amber-300/90">
-                                {provisioningHint}
-                              </p>
-                            ) : null}
-                            {standortOk ? (
-                              <p className="font-mono text-[10px] text-emerald-400/90">
-                                {standortOk}
-                              </p>
-                            ) : null}
-                            <div className="flex flex-wrap gap-2">
-                              <button
-                                type="submit"
-                                disabled={busyStandort || !sName.trim() || !sCompanyId}
-                                className="rounded-md border border-[#c9a962]/35 bg-[#c9a962]/10 px-4 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-[#d4c896] transition hover:bg-[#c9a962]/15 disabled:cursor-not-allowed disabled:opacity-50"
-                              >
-                                {busyStandort ? "Wird gespeichert…" : "Standort speichern"}
-                              </button>
-                              <button
-                                type="button"
-                                disabled={busyStandort}
-                                onClick={() => setInlineAddTenantId(null)}
-                                className="rounded-md border border-[#2a2a2a] bg-[#0f0f0f] px-4 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8a8a8a] transition hover:border-[#3a3a3a] hover:text-[#c8c8c8] disabled:opacity-50"
-                              >
-                                Abbrechen
-                              </button>
-                            </div>
-                          </form>
-                        ) : null}
-                      </div>
-                    );
-                  })()}
-                </div>
-              ))}
-            </div>
-          )}
         </section>
       </div>
     </div>
