@@ -145,13 +145,13 @@ export default async function Home() {
               <Link
                 href="https://www.axon-core.de/worker/login"
                 className="flex h-full flex-col p-8"
-                aria-label="Zur Worker-Anmeldung"
+                aria-label="Zur Mitarbeiter-App-Anmeldung"
               >
                 <div className="mb-6 inline-flex size-12 items-center justify-center rounded-xl border border-[#00D1FF]/20 bg-[#00D1FF]/10 text-[#00D1FF] transition-colors group-hover:border-[#00D1FF]/40 group-hover:bg-[#00D1FF]/15">
                   <Mic2 className="size-6" strokeWidth={1.5} aria-hidden />
                 </div>
                 <h3 className="font-[family-name:var(--font-syne)] text-xl font-semibold text-white">
-                  Konzern App
+                  Mitarbeiter App
                 </h3>
                 <p className="mt-3 flex-1 text-[15px] leading-relaxed text-zinc-400">
                   Recording &amp; KI-Rückfragen direkt an der Maschine.

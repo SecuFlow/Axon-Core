@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useEffect } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { DEMO_EVENT } from "@/app/DemoModeBootstrap";
 import { DEFAULT_LOGO_PUBLIC_PATH } from "@/lib/brandingDisplay";
 import { useBranding } from "@/components/branding/useBranding";
@@ -10,6 +10,7 @@ import {
   isDemoModeActive,
   syncDemoSlugFromUrlToSessionStorage,
 } from "@/lib/demoMode.client";
+import { useDemoLinkParam } from "@/lib/useDemoLinkParam";
 
 /**
  * Gemeinsamer Rahmen für Mitarbeiter-Routen.
@@ -17,6 +18,12 @@ import {
  */
 export function WorkerAppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  // Demo-Modus erkennen: aus URL ODER aus sessionStorage (gemeinsame Quelle für alle Demo-Hooks).
+  // Im Demo-Modus läuft die Worker-App komplett als Gast — kein Bootstrap-Auth-Check.
+  const demoParam = useDemoLinkParam();
+  const isDemo = demoParam.length > 0 || searchParams.has("demo");
+
   useEffect(() => {
     void isDemoModeActive();
     const slug = syncDemoSlugFromUrlToSessionStorage();
@@ -27,6 +34,7 @@ export function WorkerAppShell({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (pathname.startsWith("/worker/login")) return;
+    if (isDemo) return;
     let cancelled = false;
     const bootstrap = async () => {
       try {
@@ -53,7 +61,7 @@ export function WorkerAppShell({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [pathname]);
+  }, [pathname, isDemo]);
 
   const branding = useBranding();
 
