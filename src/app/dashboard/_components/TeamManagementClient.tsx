@@ -934,10 +934,10 @@ export function TeamManagementClient({ variant = "dashboard" }: { variant?: Vari
                           rowIndex % 2 === 0
                             ? "bg-slate-950/50"
                             : "bg-[#0c1016]/85"
-                        } hover:bg-[#00d1ff]/[0.07] hover:shadow-[inset_0_0_0_1px_rgba(0,209,255,0.12)]`
+                        } hover:bg-primary/10 hover:ring-1 hover:ring-primary/20`
                       : `border-b border-[#141414] transition-colors duration-150 ${
                           rowIndex % 2 === 0 ? "bg-[#070707]" : "bg-[#0a0a0a]"
-                        } hover:bg-[#00d1ff]/[0.06] hover:shadow-[inset_0_0_0_1px_rgba(0,209,255,0.1)]`
+                        } hover:bg-primary/10 hover:ring-1 hover:ring-primary/20`
                   }
                 >
                   <td className={td}>

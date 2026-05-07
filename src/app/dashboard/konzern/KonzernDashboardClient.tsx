@@ -132,7 +132,7 @@ function KpiSection({ demo }: { demo: string | null }) {
 
   return (
     <div className="mb-10 grid grid-cols-1 gap-6 md:grid-cols-2">
-      <Card className="relative overflow-hidden border-cyan-500/25 bg-slate-900/55 shadow-[0_0_44px_-14px_rgba(0,209,255,0.42)] ring-1 ring-cyan-400/20 transition-[box-shadow,filter] duration-300 hover:shadow-[0_0_56px_-10px_rgba(0,209,255,0.5)]">
+      <Card className="relative overflow-hidden border-primary/25 bg-slate-900/55 shadow-[0_0_44px_-14px_rgba(0,0,0,0.35)] ring-1 ring-primary/20 transition-[box-shadow,filter] duration-300 hover:shadow-[0_0_56px_-10px_rgba(0,0,0,0.45)]">
         <CardHeader><CardTitle>Gesichertes Wissen</CardTitle></CardHeader>
         <CardContent>
           <p className="text-3xl font-black text-white">
@@ -143,7 +143,7 @@ function KpiSection({ demo }: { demo: string | null }) {
               <BarChart data={chartData}>
                 <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: "#94a3b8", fontSize: 11 }} />
                 <Tooltip cursor={{ fill: "rgba(255,255,255,0.04)" }} />
-                <Bar dataKey="value" fill="#00D1FF" radius={[8, 8, 0, 0]} />
+                <Bar dataKey="value" fill="var(--brand-primary)" radius={[8, 8, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
