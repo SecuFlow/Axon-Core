@@ -44,6 +44,15 @@ function brandingEndpoint(demoHint?: string | null): string {
   return `/api/branding?t=${Date.now()}`;
 }
 
+function isWorkerPath(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.location.pathname.startsWith("/worker");
+}
+
+function isDemoActiveForBootstrap(): boolean {
+  return Boolean(demoRawFromCurrentUrl() || readDemoSlug());
+}
+
 /**
  * Gemeinsame Logik für Root-Dashboard und Worker-App:
  * Cache → Server-Fetch → Events (BRANDING_UPDATED, DEMO).
@@ -84,10 +93,15 @@ export function BrandingBootstrapCore() {
     void load();
 
     // Realtime: Branding-Änderungen tenant-gebunden abonnieren (Dashboard + Worker).
-    // Token kommt über /api/worker/bootstrap (server liest HttpOnly Cookie und reicht es durch).
+    // Dashboard-Token kommt über /api/dashboard/branding/context.
+    // Worker-Token kommt über /api/worker/bootstrap.
     void (async () => {
       try {
-        const ctxResp = await fetch(`/api/worker/bootstrap?t=${Date.now()}`, {
+        if (isDemoActiveForBootstrap()) return;
+        const ctxEndpoint = isWorkerPath()
+          ? `/api/worker/bootstrap?t=${Date.now()}`
+          : `/api/dashboard/branding/context?t=${Date.now()}`;
+        const ctxResp = await fetch(ctxEndpoint, {
           credentials: "include",
           cache: "no-store",
         });
@@ -95,11 +109,14 @@ export function BrandingBootstrapCore() {
           error?: string;
           mandant_id?: string | null;
           accessToken?: string | null;
+          tenantId?: string | null;
         };
         if (!ctxResp.ok) return;
         const tenantId =
-          typeof ctxPayload.mandant_id === "string" && ctxPayload.mandant_id.trim()
-            ? ctxPayload.mandant_id.trim()
+          typeof ctxPayload.tenantId === "string" && ctxPayload.tenantId.trim()
+            ? ctxPayload.tenantId.trim()
+            : typeof ctxPayload.mandant_id === "string" && ctxPayload.mandant_id.trim()
+              ? ctxPayload.mandant_id.trim()
             : "";
         const accessToken =
           typeof ctxPayload.accessToken === "string" && ctxPayload.accessToken.trim()

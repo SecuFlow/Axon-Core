@@ -219,59 +219,30 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const mandatesRes = await ctx.service
-    .from("mandates")
-    .select("id, created_at, tenant_id, title, description")
-    .order("tenant_id", { ascending: true })
-    .order("title", { ascending: true });
-
-  const useLegacyLocations =
-    mandatesRes.error?.message?.toLowerCase().includes("mandates") === true;
-
-  let list: Array<{
+  // Wichtig: Admin-HQ "Standorte" soll dieselbe Quelle wie das Konzern-Dashboard anzeigen.
+  // Das Konzern-Dashboard liest Standorte aus `locations`. Mandate (falls vorhanden) sind ein
+  // anderes Konzept (Provisionierung/Abrechnung) und dürfen die Standort-Ansicht nicht ersetzen.
+  const legacy = await ctx.service
+    .from("locations")
+    .select("id, created_at, company_id, name, address")
+    .order("company_id", { ascending: true })
+    .order("name", { ascending: true });
+  if (legacy.error) {
+    if (legacy.error.message.includes("locations")) {
+      return NextResponse.json({ groups: [] }, { headers: CACHE_HEADERS });
+    }
+    return NextResponse.json(
+      { error: legacy.error.message },
+      { status: 500, headers: CACHE_HEADERS },
+    );
+  }
+  const list = (legacy.data ?? []) as Array<{
     id: string;
     created_at: string;
     company_id: string;
     name: string;
     address: string | null;
-  }> = [];
-
-  if (useLegacyLocations) {
-    const legacy = await ctx.service
-      .from("locations")
-      .select("id, created_at, company_id, name, address")
-      .order("company_id", { ascending: true })
-      .order("name", { ascending: true });
-    if (legacy.error) {
-      if (legacy.error.message.includes("locations")) {
-        return NextResponse.json({ groups: [] }, { headers: CACHE_HEADERS });
-      }
-      return NextResponse.json({ error: legacy.error.message }, { status: 500, headers: CACHE_HEADERS });
-    }
-    list = (legacy.data ?? []) as Array<{
-      id: string;
-      created_at: string;
-      company_id: string;
-      name: string;
-      address: string | null;
-    }>;
-  } else if (mandatesRes.error) {
-    return NextResponse.json({ error: mandatesRes.error.message }, { status: 500, headers: CACHE_HEADERS });
-  } else {
-    list = ((mandatesRes.data ?? []) as Array<{
-      id: string;
-      created_at: string;
-      tenant_id: string;
-      title: string;
-      description: string | null;
-    }>).map((m) => ({
-      id: m.id,
-      created_at: m.created_at,
-      company_id: m.tenant_id,
-      name: m.title,
-      address: m.description ?? null,
-    }));
-  }
+  }>;
 
   const { data: comps, error: cErr } = await ctx.service
     .from("companies")
@@ -303,7 +274,6 @@ export async function GET(request: NextRequest) {
   const nameByTenant = new Map<string, string>();
   const logoByTenant = new Map<string, string | null>();
   const brancheByTenant = new Map<string, string | null>();
-  const allowedTenantIds = new Set<string>();
 
   for (const row of comps ?? []) {
     const r = row as {
@@ -317,17 +287,6 @@ export async function GET(request: NextRequest) {
     };
     if (!r.tenant_id) continue;
     const name = (r.name ?? "Konzern").trim() || "Konzern";
-
-    // Harte Enterprise-Ready Filter (ohne DB-Änderungen).
-    if (!isRealCompanyOption({ name, tenantId: r.tenant_id })) continue;
-    const hasDemoSlug =
-      typeof r.demo_slug === "string" && r.demo_slug.trim().length > 0;
-    if (hasDemoSlug) continue;
-    if (r.is_demo_active === true) continue;
-    if (r.show_cta === true) continue;
-    if (looksLikeDemoOrTestCompanyName(name)) continue;
-
-    allowedTenantIds.add(r.tenant_id);
 
     if (!nameByTenant.has(r.tenant_id)) {
       nameByTenant.set(r.tenant_id, name);
@@ -346,8 +305,9 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  const filteredLocs = list.filter((l) => allowedTenantIds.has(l.company_id));
-  return finishGroups(filteredLocs, nameByTenant, logoByTenant, brancheByTenant, CACHE_HEADERS);
+  // Keine Enterprise-/Demo-Filter im Admin-HQ: es ist eine interne Verwaltung und soll
+  // exakt die Standorte abbilden, die im Konzern-Dashboard sichtbar sind.
+  return finishGroups(list, nameByTenant, logoByTenant, brancheByTenant, CACHE_HEADERS);
 }
 
 function finishGroups(
