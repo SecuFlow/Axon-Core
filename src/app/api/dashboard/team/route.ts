@@ -129,6 +129,12 @@ export async function GET() {
   if (authListRes.error) {
     return NextResponse.json({ error: authListRes.error.message }, { status: 500 });
   }
+  if (compRowsRes.error) {
+    return NextResponse.json({ error: compRowsRes.error.message }, { status: 500 });
+  }
+  if (companyPickRes.error) {
+    return NextResponse.json({ error: companyPickRes.error.message }, { status: 500 });
+  }
 
   const profRows = profRowsRes.data;
   const listData = authListRes.data;
@@ -249,7 +255,7 @@ export async function GET() {
     companyPkSet.size > 0
       ? service
           .from("companies")
-          .select("id, tenant_id")
+          .select("id, tenant_id, name")
           .in("id", [...companyPkSet])
       : Promise.resolve({ data: [] as Array<{ id: string; tenant_id: string | null }>, error: null }),
     service
@@ -257,16 +263,29 @@ export async function GET() {
       .select("id, name, company_id")
       .order("name", { ascending: true }),
   ]);
+  if (tenantsByPkRes.error) {
+    return NextResponse.json({ error: tenantsByPkRes.error.message }, { status: 500 });
+  }
+  if (locsRes.error) {
+    return NextResponse.json({ error: locsRes.error.message }, { status: 500 });
+  }
 
   const tenantByCompanyPk = new Map<string, string>();
+  const companyPkToName = new Map<string, string>();
   for (const tr of tenantsByPkRes.data ?? []) {
-    const r = tr as { id?: string; tenant_id?: string | null };
+    const r = tr as { id?: string; tenant_id?: string | null; name?: string | null };
     if (
       typeof r.id === "string" &&
       typeof r.tenant_id === "string" &&
       r.tenant_id.length > 0
     ) {
       tenantByCompanyPk.set(r.id, r.tenant_id);
+    }
+    if (typeof r.id === "string" && r.id.length > 0) {
+      const n = typeof r.name === "string" ? r.name.trim() : "";
+      if (n) {
+        companyPkToName.set(r.id, n);
+      }
     }
   }
 
@@ -358,6 +377,7 @@ export async function GET() {
       let tenantAffiliation = "—";
       if (row?.company_id) {
         tenantAffiliation =
+          companyPkToName.get(row.company_id) ??
           companyIdToName.get(row.company_id) ??
           `Konzern ${row.company_id.slice(0, 8)}…`;
       } else if (profileTenantId) {
