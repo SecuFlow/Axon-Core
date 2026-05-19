@@ -23,8 +23,10 @@ export default async function CheckoutPage({ searchParams }: Props) {
           <p className="mt-4 rounded-lg border border-slate-700 bg-slate-900/50 p-3 text-xs text-slate-300">
             Stripe-Checkout ist nicht erreichbar. Bitte{" "}
             <code className="rounded bg-black/30 px-1">STRIPE_SECRET_KEY</code> und{" "}
-            <code className="rounded bg-black/30 px-1">STRIPE_PRICE_ID</code> in der
-            Umgebung setzen (Vercel / .env).
+            <code className="rounded bg-black/30 px-1">
+              STRIPE_PRICE_LOCATION_MONTHLY
+            </code>{" "}
+            in der Umgebung setzen (Vercel / .env).
           </p>
         ) : null}
         <div className="mt-6 flex flex-col gap-3">

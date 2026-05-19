@@ -43,6 +43,7 @@ export async function POST(req: Request) {
     companyName?: string;
     accountType?: string;
     role?: string;
+    demo?: string;
   } = {};
   try {
     payload = await req.json();
@@ -59,6 +60,15 @@ export async function POST(req: Request) {
   const username = (payload.username ?? "").trim();
   const rawRole = (payload.role ?? "").trim().toLowerCase();
   const rawAccount = (payload.accountType ?? "").trim().toLowerCase();
+  // Demo-Slug aus dem Demo-Flow (Konzern-Demo via Demo-Link).
+  // Wird ins Stripe-Metadata gehängt, damit `runPostPaymentSetup`
+  // das Demo-Branding (Logo/Primary-Farbe) in den frisch angelegten
+  // Mandanten übernehmen kann.
+  const demoSlugRaw = (payload.demo ?? "").trim();
+  const demoSlug =
+    demoSlugRaw && demoSlugRaw.toLowerCase() !== "true"
+      ? demoSlugRaw.slice(0, 200)
+      : "";
 
   // Mitarbeiter-Konten dürfen NUR durch den Manager im Dashboard angelegt werden.
   // Wir blocken sowohl explizite Worker-Rollen als auch Worker-Account-Types,
@@ -243,38 +253,10 @@ export async function POST(req: Request) {
   }
 
   const base = siteBaseUrl(req);
-  // Preisquelle: DB (System-Einspeisung) > ENV fallback
-  let priceIdEnterprise: string | null = process.env.STRIPE_PRICE_ID?.trim() ?? null;
-  let priceIdSmb: string | null = process.env.STRIPE_PRICE_ID_SMB?.trim() ?? null;
-  try {
-    const cfg = await supabaseService
-      .from("pricing_config")
-      .select("stripe_price_id, stripe_price_id_enterprise, stripe_price_id_smb, updated_at")
-      .order("updated_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    const cfgRow = cfg.data as {
-      stripe_price_id?: unknown;
-      stripe_price_id_enterprise?: unknown;
-      stripe_price_id_smb?: unknown;
-    } | null;
-    const dbEnterprise =
-      typeof cfgRow?.stripe_price_id_enterprise === "string"
-        ? cfgRow.stripe_price_id_enterprise.trim()
-        : "";
-    const dbLegacy =
-      typeof cfgRow?.stripe_price_id === "string"
-        ? cfgRow.stripe_price_id.trim()
-        : "";
-    const dbSmb =
-      typeof cfgRow?.stripe_price_id_smb === "string"
-        ? cfgRow.stripe_price_id_smb.trim()
-        : "";
-    if (dbEnterprise || dbLegacy) priceIdEnterprise = dbEnterprise || dbLegacy;
-    if (dbSmb) priceIdSmb = dbSmb;
-  } catch {
-    // ignore: ENV fallback bleibt aktiv
-  }
+  // Preis pro Standort (neu) – ENV ist die Quelle der Wahrheit.
+  const pricePerLocation = process.env.STRIPE_PRICE_LOCATION_MONTHLY?.trim() ??
+    process.env.STRIPE_PRICE_ID?.trim() ??
+    null;
 
   let redirectUrl = `${base}/checkout?registered=1`;
 
@@ -282,19 +264,22 @@ export async function POST(req: Request) {
     redirectUrl = `${base}/coin-space`;
   } else {
     const stripe = getStripeServer();
-    const targetPriceId =
-      normalizedRole === "small_business"
-        ? priceIdSmb ?? priceIdEnterprise
-        : priceIdEnterprise;
-    if (stripe && targetPriceId) {
+    if (stripe && pricePerLocation) {
       try {
         const checkoutSession = await stripe.checkout.sessions.create({
           mode: "subscription",
           customer_email: email,
-          line_items: [{ price: targetPriceId, quantity: 1 }],
+          // Billing: pro Standort (Quantity); beim Onboarding starten wir mit 1 Standort.
+          line_items: [{ price: pricePerLocation, quantity: 1 }],
           success_url: `${base}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
           cancel_url: `${base}/checkout?canceled=1`,
-          metadata: { supabase_user_id: userId },
+          metadata: {
+            supabase_user_id: userId,
+            source: "register",
+            // Demo-Slug landet im Stripe-Event und wird von
+            // `runPostPaymentSetup` ausgelesen, um Demo-Branding zu übernehmen.
+            ...(demoSlug ? { demo_slug: demoSlug } : {}),
+          },
           client_reference_id: userId,
         });
         if (checkoutSession.url) {

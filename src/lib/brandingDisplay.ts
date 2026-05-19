@@ -4,8 +4,8 @@ import {
 } from "@/lib/brandTheme";
 import type { ClientBranding } from "@/components/branding/useBranding";
 
-/** Öffentlicher Pfad — gleicher Fallback wie Konzern-Dashboard & Worker. */
-export const DEFAULT_LOGO_PUBLIC_PATH = "/default-logo.svg" as const;
+/** Öffentlicher Pfad — gleicher Fallback wie Konzern-Dashboard, Admin HQ & Worker. */
+export const DEFAULT_LOGO_PUBLIC_PATH = "/axoncore-logo.png" as const;
 
 /** „Tote“ UI-Farben: leer oder effektiv schwarz. */
 export function isInvisiblePrimaryColor(hex: string | null | undefined): boolean {

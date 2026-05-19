@@ -68,8 +68,8 @@ export function SuccessClient({ sessionId }: Props) {
 
         <div className="mt-6 h-3 w-full overflow-hidden rounded-full border border-white/[0.12] bg-black/30">
           <div
-            className="h-full rounded-full bg-[#00D1FF] transition-all duration-500"
-            style={{ width: `${progress}%` }}
+            className="h-full rounded-full transition-all duration-500"
+            style={{ width: `${progress}%`, backgroundColor: "var(--brand-primary)" }}
           />
         </div>
 
@@ -90,7 +90,12 @@ export function SuccessClient({ sessionId }: Props) {
 
         <a
           href="/dashboard/konzern"
-          className="mt-6 inline-flex h-11 items-center justify-center rounded-full border border-[#00D1FF]/50 bg-[#00D1FF] px-6 text-sm font-semibold text-[#030304] transition hover:bg-[#33ddff]"
+          className="mt-6 inline-flex h-11 items-center justify-center rounded-full border px-6 text-sm font-semibold transition hover:opacity-95"
+          style={{
+            borderColor: "color-mix(in oklab, var(--brand-primary) 70%, transparent)",
+            backgroundColor: "var(--brand-primary)",
+            color: "#030304",
+          }}
         >
           Zur Kunden-Ansicht (Konzern-Dashboard)
         </a>

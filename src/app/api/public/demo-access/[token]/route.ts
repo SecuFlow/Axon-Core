@@ -48,13 +48,17 @@ export async function GET(
     expires_at?: string | null;
     revoked_at?: string | null;
   };
-  if (row.revoked_at || isExpired(row.expires_at)) {
-    return NextResponse.redirect(new URL("/demo-anfordern", req.url));
-  }
-
   const slug = (row.demo_slug ?? "").trim();
   if (!slug) {
     return NextResponse.redirect(new URL("/demo-anfordern", req.url));
+  }
+
+  // Demo ist nur 7 Tage gültig. Danach → Checkout (Paywall).
+  if (row.revoked_at || isExpired(row.expires_at)) {
+    const paywall = new URL("/checkout", req.url);
+    paywall.searchParams.set("reason", "demo_expired");
+    paywall.searchParams.set("demo", slug);
+    return NextResponse.redirect(paywall);
   }
 
   const redirectUrl = new URL("/dashboard/konzern", req.url);

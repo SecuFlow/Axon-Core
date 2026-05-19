@@ -17,6 +17,7 @@
     "@supabase/supabase-js": "^2.100.0",
     "framer-motion": "^12.38.0",
     "googleapis": "^156.0.0",
+    "html-to-image": "^1.11.13",
     "lucide-react": "^1.0.1",
     "next": "16.2.1",
     "openai": "^6.33.0",
@@ -24,6 +25,7 @@
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "recharts": "^3.8.1",
+    "sharp": "^0.34.5",
     "sonner": "^2.0.7",
     "stripe": "^20.4.1",
     "swr": "^2.4.1"

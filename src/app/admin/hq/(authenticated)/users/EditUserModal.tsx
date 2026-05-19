@@ -28,6 +28,7 @@ export function EditUserModal({ user, open, onClose, onSaved }: Props) {
   const [initialEmail, setInitialEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [loginConfirmOpen, setLoginConfirmOpen] = useState(false);
 
   useEffect(() => {
@@ -82,6 +83,29 @@ export function EditUserModal({ user, open, onClose, onSaved }: Props) {
       onClose();
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function deleteUser() {
+    const target = user;
+    if (!target || deleting || saving) return;
+    if (!window.confirm(`Nutzer „${target.email}“ wirklich löschen?`)) return;
+    setError(null);
+    setDeleting(true);
+    try {
+      const resp = await fetch(`/api/admin/users/${target.id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      const payload: { error?: string } = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        setError(payload.error ?? "Löschen fehlgeschlagen");
+        return;
+      }
+      onSaved();
+      onClose();
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -277,14 +301,22 @@ export function EditUserModal({ user, open, onClose, onSaved }: Props) {
               <button
                 type="button"
                 onClick={onClose}
-                disabled={saving}
+                disabled={saving || deleting}
                 className="rounded border border-[#2a2a2a] bg-[#111] px-4 py-2 font-mono text-xs uppercase tracking-[0.12em] text-[#8a8a8a] transition hover:border-[#3a3a3a] disabled:opacity-50"
               >
                 Abbrechen
               </button>
               <button
+                type="button"
+                onClick={() => void deleteUser()}
+                disabled={saving || deleting}
+                className="rounded border border-red-500/35 bg-red-500/10 px-4 py-2 font-mono text-xs font-medium uppercase tracking-[0.12em] text-red-200 transition hover:bg-red-500/15 disabled:opacity-50"
+              >
+                {deleting ? "…" : "Löschen"}
+              </button>
+              <button
                 type="submit"
-                disabled={saving}
+                disabled={saving || deleting}
                 className="rounded border border-[#c9a962]/40 bg-[#c9a962]/15 px-4 py-2 font-mono text-xs font-medium uppercase tracking-[0.12em] text-[#d4c896] transition hover:bg-[#c9a962]/25 disabled:opacity-50"
               >
                 {saving ? "…" : "Speichern"}

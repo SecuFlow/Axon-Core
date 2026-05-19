@@ -185,16 +185,20 @@ export async function GET(request: NextRequest) {
 
   const profileScope = firstProfileScope(prof);
   const isProfileManager = prof.role === "manager";
+  const isCompanyManager = normalizeDbRole(ctx.companyRole) === "manager";
+  // Manager sollen niemals mandantenübergreifend browsen können, auch nicht wenn sie
+  // zusätzlich Plattform-Admin-Rechte haben.
+  const isManagerLike = isProfileManager || isCompanyManager;
   const standortMeta = {
     profile_role: prof.role,
     mandate_company_name: mandateName,
     profile_company_id: prof.company_id,
-    mandant_switcher_eligible: ctx.isAdmin && !isProfileManager,
+    mandant_switcher_eligible: ctx.isAdmin && !isManagerLike,
   };
 
   let filterTenantId: string | null = null;
 
-  if (isProfileManager) {
+  if (isManagerLike) {
     filterTenantId = await managerMandateTenantId(ctx.service, prof);
     if (!filterTenantId) {
       return NextResponse.json(
@@ -326,9 +330,11 @@ export async function POST(request: NextRequest) {
   const prof = await loadProfileCompany(ctx.service, ctx.userId);
   const profileScope = firstProfileScope(prof);
   const isProfileManager = prof.role === "manager";
+  const isCompanyManager = normalizeDbRole(ctx.companyRole) === "manager";
+  const isManagerLike = isProfileManager || isCompanyManager;
 
   let targetTenantId: string;
-  if (isProfileManager) {
+  if (isManagerLike) {
     const tid = await managerMandateTenantId(ctx.service, prof);
     if (!tid) {
       return NextResponse.json(
@@ -396,6 +402,76 @@ export async function POST(request: NextRequest) {
       );
     }
     targetTenantId = ctx.tenantId;
+  }
+
+  // Standort-Limit (Abo pro Standort): nur für echte Konzern-User (nicht Plattform-Admin).
+  // Wenn das Schema noch keine Stripe-Spalten besitzt, läuft das als Best-Effort (kein hard fail).
+  if (!ctx.isAdmin) {
+    // 1) Subscription-Status/Quantity aus companies lesen (tenant-gebunden).
+    let subQuantity: number | null = null;
+    let subStatus: string | null = null;
+    let isSubscribed = false;
+    try {
+      const coRes = await ctx.service
+        .from("companies")
+        .select("is_subscribed, subscription_quantity, subscription_status")
+        .eq("tenant_id", targetTenantId)
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      const row = coRes.data as
+        | {
+            is_subscribed?: boolean | null;
+            subscription_quantity?: number | null;
+            subscription_status?: string | null;
+          }
+        | null;
+      isSubscribed = row?.is_subscribed === true;
+      subQuantity =
+        typeof row?.subscription_quantity === "number" && Number.isFinite(row.subscription_quantity)
+          ? row.subscription_quantity
+          : null;
+      subStatus = typeof row?.subscription_status === "string" ? row.subscription_status : null;
+    } catch {
+      // ignore: legacy schema
+    }
+
+    // 2) Falls nicht aktiv abonniert: blocken (Paywall).
+    const statusNorm = (subStatus ?? "").trim().toLowerCase();
+    const statusActive = statusNorm === "" || statusNorm === "active" || statusNorm === "trialing";
+    if (!isSubscribed || !statusActive) {
+      return NextResponse.json(
+        {
+          error: "Abo erforderlich. Bitte schließe den Checkout ab, um Standorte anzulegen.",
+          code: "checkout_required",
+          checkout: "/checkout",
+        },
+        { status: 402 },
+      );
+    }
+
+    // 3) Quantity-Limit: wenn vorhanden, blocken sobald count >= quantity.
+    if (subQuantity != null && subQuantity > 0) {
+      const countRes = await ctx.service
+        .from("locations")
+        .select("id", { head: true, count: "exact" })
+        .eq("company_id", targetTenantId);
+      const current = typeof countRes.count === "number" ? countRes.count : 0;
+      if (current >= subQuantity) {
+        const next = Math.max(subQuantity + 1, current + 1);
+        return NextResponse.json(
+          {
+            error:
+              "Standort-Limit erreicht. Bitte Upgrade durchführen, um weitere Standorte freizuschalten.",
+            code: "location_limit_reached",
+            current,
+            allowed: subQuantity,
+            upgrade_checkout: `/api/checkout/upgrade?target=${encodeURIComponent(String(next))}`,
+          },
+          { status: 402 },
+        );
+      }
+    }
   }
 
   const name = (body.name ?? "").trim();

@@ -15,6 +15,7 @@ import {
   dataUrlToFile,
   enqueuePendingVoiceSync,
   filesToDataUrls,
+  getOfflineReportCount,
   getOfflineReportsQueue,
   getPendingVoiceQueue,
   queueOfflineReport,
@@ -172,6 +173,8 @@ export default function WorkerDashboardPage() {
   const [offlineSyncInfo, setOfflineSyncInfo] = useState<string | null>(null);
   const [isSyncingOffline, setIsSyncingOffline] = useState(false);
   const [isFlushingVoice, setIsFlushingVoice] = useState(false);
+  const [pendingOfflineCount, setPendingOfflineCount] = useState(0);
+  const [needsRelogin, setNeedsRelogin] = useState(false);
   const [isOptimizingPhoto, setIsOptimizingPhoto] = useState(false);
   const [isSavingPriority, setIsSavingPriority] = useState(false);
 
@@ -193,10 +196,16 @@ export default function WorkerDashboardPage() {
   const chunksRef = useRef<Blob[]>([]);
   const photoItemsRef = useRef(photoItems);
   const recordingPressActiveRef = useRef(false);
+  const isRecordingRef = useRef(false);
+  const recordingFinishLockRef = useRef(false);
 
   useEffect(() => {
     currentStepRef.current = currentStep;
   }, [currentStep]);
+
+  useEffect(() => {
+    isRecordingRef.current = isRecording;
+  }, [isRecording]);
 
   useEffect(() => {
     const confirmed = window.localStorage.getItem(DSGVO_CONFIRMATION_KEY) === "1";
@@ -385,6 +394,7 @@ export default function WorkerDashboardPage() {
         setIsRecording(false);
         setIsRecordingPressed(false);
         recordingPressActiveRef.current = false;
+        recordingFinishLockRef.current = false;
 
         if (completeBlob.size === 0) {
           pendingSyncFieldRef.current = null;
@@ -400,6 +410,11 @@ export default function WorkerDashboardPage() {
 
       recorder.start();
       setIsRecording(true);
+      // iOS: Finger oft schon weg, bevor getUserMedia fertig ist — nur stoppen, nicht weiter.
+      if (!recordingPressActiveRef.current) {
+        stopRecording();
+        setIsRecordingPressed(false);
+      }
     } catch {
       setIsRecordingPressed(false);
       recordingPressActiveRef.current = false;
@@ -416,6 +431,15 @@ export default function WorkerDashboardPage() {
   };
 
   const finishRecordingStep = () => {
+    if (recordingFinishLockRef.current) return;
+    const recorder = mediaRecorderRef.current;
+    if (!recorder || recorder.state === "inactive") {
+      recordingPressActiveRef.current = false;
+      setIsRecordingPressed(false);
+      return;
+    }
+    recordingFinishLockRef.current = true;
+
     const stepAtStop = currentStepRef.current;
     if (stepAtStop === "ask_machine_name") {
       pendingSyncFieldRef.current = "machine_name";
@@ -440,21 +464,44 @@ export default function WorkerDashboardPage() {
   };
 
   const handleRecordPressStart = async () => {
-    if (isOverlayVisible || !micInteractive || isRecording) return;
+    if (isOverlayVisible || !micInteractive) return;
+    if (isRecordingRef.current) {
+      finishRecordingStep();
+      return;
+    }
     setIsRecordingPressed(true);
     recordingPressActiveRef.current = true;
     await startRecording();
   };
 
   const handleRecordPressEnd = () => {
-    if (!recordingPressActiveRef.current) return;
-    if (isRecording) {
+    if (!recordingPressActiveRef.current && !isRecordingRef.current) return;
+    recordingPressActiveRef.current = false;
+    setIsRecordingPressed(false);
+    if (isRecordingRef.current) {
       finishRecordingStep();
-    } else {
-      setIsRecordingPressed(false);
-      recordingPressActiveRef.current = false;
     }
   };
+
+  const finishRecordingStepRef = useRef(finishRecordingStep);
+  finishRecordingStepRef.current = finishRecordingStep;
+
+  /** iOS: Loslassen außerhalb des Buttons oder nach Text-Selektion — trotzdem stoppen. */
+  useEffect(() => {
+    if (!isRecording) return;
+    const onGlobalRelease = () => {
+      if (!isRecordingRef.current) return;
+      finishRecordingStepRef.current();
+    };
+    document.addEventListener("pointerup", onGlobalRelease);
+    document.addEventListener("touchend", onGlobalRelease);
+    document.addEventListener("pointercancel", onGlobalRelease);
+    return () => {
+      document.removeEventListener("pointerup", onGlobalRelease);
+      document.removeEventListener("touchend", onGlobalRelease);
+      document.removeEventListener("pointercancel", onGlobalRelease);
+    };
+  }, [isRecording]);
 
   const handlePhotoSelected = async (event: ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
@@ -501,13 +548,26 @@ export default function WorkerDashboardPage() {
     !isOptimizingPhoto &&
     !isOverlayVisible;
 
+  const refreshPendingCount = useCallback(async () => {
+    try {
+      const c = await getOfflineReportCount();
+      setPendingOfflineCount(c);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   const syncOfflineReports = useCallback(async () => {
     if (isSyncingOffline) return;
     const queue = await getOfflineReportsQueue();
-    if (queue.length === 0) return;
+    if (queue.length === 0) {
+      setPendingOfflineCount(0);
+      return;
+    }
     setIsSyncingOffline(true);
     setOfflineSyncInfo(null);
     let synced = 0;
+    let authFailed = false;
     for (const item of queue) {
       try {
         const formData = new FormData();
@@ -522,7 +582,12 @@ export default function WorkerDashboardPage() {
         const resp = await fetch("/api/ai/analyze", {
           method: "POST",
           body: formData,
+          credentials: "include",
         });
+        if (resp.status === 401) {
+          authFailed = true;
+          break;
+        }
         if (!resp.ok) continue;
         await removeOfflineReportById(item.id);
         synced += 1;
@@ -530,15 +595,25 @@ export default function WorkerDashboardPage() {
         // warten bis nächste Verbindung stabil ist
       }
     }
-    setOfflineSyncInfo(
-      synced > 0
-        ? `${synced} Offline-Bericht(e) synchronisiert.`
-        : "Offline-Sync wartet auf stabile Verbindung.",
-    );
+    await refreshPendingCount();
+    if (authFailed) {
+      setNeedsRelogin(true);
+      setOfflineSyncInfo(
+        "Sitzung abgelaufen. Bitte erneut anmelden, damit die wartenden Berichte hochgeladen werden.",
+      );
+    } else {
+      setNeedsRelogin(false);
+      setOfflineSyncInfo(
+        synced > 0
+          ? `${synced} Offline-Bericht(e) ins Konzern-Dashboard übertragen.`
+          : null,
+      );
+    }
     setIsSyncingOffline(false);
-  }, [isSyncingOffline]);
+  }, [isSyncingOffline, refreshPendingCount]);
 
   useEffect(() => {
+    void refreshPendingCount();
     void syncOfflineReports();
     const onOnline = () => {
       void syncOfflineReports();
@@ -546,7 +621,14 @@ export default function WorkerDashboardPage() {
     };
     window.addEventListener("online", onOnline);
     return () => window.removeEventListener("online", onOnline);
-  }, [syncOfflineReports, flushPendingVoiceFromIdb]);
+  }, [syncOfflineReports, flushPendingVoiceFromIdb, refreshPendingCount]);
+
+  useEffect(() => {
+    const handle = window.setInterval(() => {
+      void refreshPendingCount();
+    }, 30000);
+    return () => window.clearInterval(handle);
+  }, [refreshPendingCount]);
 
   useEffect(() => {
     void flushPendingVoiceFromIdb();
@@ -559,12 +641,31 @@ export default function WorkerDashboardPage() {
 
     const displayRaw =
       machineName.trim() || issueDescription.trim() || "die Maschine";
-    const closingText = `Danke, der Bericht für ${displayRaw} wurde gespeichert.`;
+
+    // Demo-Modus: Es gibt keine Auth-Session, daher würde `/api/ai/analyze`
+    // sofort 401 zurückgeben. Statt eine irreführende „Sitzung abgelaufen"-
+    // Meldung zu zeigen, erklären wir explizit den Demo-Charakter und führen
+    // den Lead direkt in den Register/Stripe-Flow.
+    if (demoParam) {
+      setCurrentStep("idle");
+      setAnalyzeError(
+        'Demo-Modus: KI-Analyse und Speicherung im Konzern-Dashboard sind im echten Account verfügbar. Wir leiten dich zur Registrierung weiter.',
+      );
+      setIsSending(false);
+      const url = `/register?role=konzern&demo=${encodeURIComponent(demoParam)}`;
+      if (typeof window !== "undefined") {
+        window.setTimeout(() => {
+          window.location.href = url;
+        }, 1500);
+      }
+      return;
+    }
 
     setCurrentStep("complete");
     void (async () => {
-      const ok = await speakGermanViaServerTts(closingText);
-      if (!ok) speakGermanTts(closingText);
+      const uploadingText = `Bericht für ${displayRaw} wird übertragen.`;
+      const ok = await speakGermanViaServerTts(uploadingText);
+      if (!ok) speakGermanTts(uploadingText);
     })();
 
     const photoFiles = photoItems.map((i) => i.file);
@@ -599,6 +700,7 @@ export default function WorkerDashboardPage() {
           setOfflineSyncInfo(
             "Bericht offline gespeichert. Wird synchronisiert, sobald die Verbindung steht.",
           );
+          await refreshPendingCount();
         } catch {
           setAnalyzeError(
             "Bericht konnte lokal nicht gespeichert werden. Bitte erneut versuchen.",
@@ -619,7 +721,24 @@ export default function WorkerDashboardPage() {
       const resp = await fetch("/api/ai/analyze", {
         method: "POST",
         body: formData,
+        credentials: "include",
       });
+
+      if (resp.status === 401) {
+        await queueOfflineReport({
+          machineName: machineName.trim(),
+          issueDescription: issueWithCategory,
+          category: normalizedCategory,
+          photoDataUrls,
+          httpError: "401",
+        });
+        setNeedsRelogin(true);
+        setAnalyzeError(
+          "Sitzung abgelaufen. Bitte erneut anmelden, damit der Bericht ins Konzern-Dashboard übertragen wird.",
+        );
+        await refreshPendingCount();
+        return;
+      }
 
       const payload: {
         error?: string;
@@ -641,6 +760,7 @@ export default function WorkerDashboardPage() {
           photoDataUrls,
           httpError: payload.error ?? `HTTP ${resp.status}`,
         });
+        await refreshPendingCount();
         return;
       }
 
@@ -663,7 +783,14 @@ export default function WorkerDashboardPage() {
       setCaseId(payload.case_id ?? null);
 
       if (payload.case_id) {
+        setNeedsRelogin(false);
         await clearOfflineReportsQueue();
+        await refreshPendingCount();
+        void (async () => {
+          const okText = `Bericht für ${displayRaw} wurde im Konzern-Dashboard gespeichert.`;
+          const ok = await speakGermanViaServerTts(okText);
+          if (!ok) speakGermanTts(okText);
+        })();
       } else {
         await queueOfflineReport({
           machineName: machineName.trim(),
@@ -677,6 +804,11 @@ export default function WorkerDashboardPage() {
               : null,
           warning: payload.warning ?? "Kein case_id (Speichern fehlgeschlagen?)",
         });
+        setAnalyzeError(
+          payload.warning ??
+            "Server hat den Bericht nicht gespeichert. Bericht wartet auf erneuten Upload.",
+        );
+        await refreshPendingCount();
       }
 
       if (payload.case_id) {
@@ -722,7 +854,9 @@ export default function WorkerDashboardPage() {
         }
       }
     } catch {
-      setAnalyzeError("Netzwerkfehler beim Speichern der Analyse.");
+      setAnalyzeError(
+        "Netzwerkfehler beim Speichern. Bericht wartet lokal und wird automatisch hochgeladen.",
+      );
       await queueOfflineReport({
         machineName: machineName.trim(),
         issueDescription: issueWithCategory,
@@ -730,6 +864,7 @@ export default function WorkerDashboardPage() {
         photoDataUrls,
         httpError: "Netzwerkfehler",
       });
+      await refreshPendingCount();
     } finally {
       setIsSending(false);
     }
@@ -807,7 +942,41 @@ export default function WorkerDashboardPage() {
 
   return (
     <main className="relative min-h-screen px-6 py-10 text-zinc-100">
-      {isSyncingOffline || isFlushingVoice ? (
+      {needsRelogin && pendingOfflineCount > 0 ? (
+        <div className="fixed left-0 right-0 top-14 z-[36] flex justify-center px-4">
+          <div
+            className="flex max-w-xl flex-col items-center gap-2 rounded-2xl border border-amber-400/40 bg-amber-500/15 px-5 py-3 text-center text-sm text-amber-100 shadow-lg backdrop-blur-md"
+            role="alert"
+            aria-live="assertive"
+          >
+            <p className="font-semibold">
+              {pendingOfflineCount} Bericht(e) warten auf Upload
+            </p>
+            <p className="text-xs text-amber-100/80">
+              Sitzung abgelaufen. Bitte erneut anmelden, dann werden die
+              Berichte automatisch ins Konzern-Dashboard übertragen.
+            </p>
+            <a
+              href="/worker/login"
+              className="rounded-full border border-amber-300/60 bg-amber-400/30 px-4 py-1.5 text-xs font-semibold text-amber-50 hover:bg-amber-400/40"
+            >
+              Jetzt neu anmelden
+            </a>
+          </div>
+        </div>
+      ) : pendingOfflineCount > 0 ? (
+        <div className="pointer-events-none fixed left-0 right-0 top-14 z-[35] flex justify-center px-4">
+          <div
+            className="max-w-xl rounded-full border border-amber-400/30 bg-amber-500/10 px-5 py-2 text-center text-xs text-amber-100 shadow-lg backdrop-blur-md"
+            role="status"
+            aria-live="polite"
+          >
+            {isSyncingOffline
+              ? `Übertrage ${pendingOfflineCount} Bericht(e) ins Konzern-Dashboard…`
+              : `${pendingOfflineCount} Bericht(e) warten auf Upload`}
+          </div>
+        </div>
+      ) : isSyncingOffline || isFlushingVoice ? (
         <div className="pointer-events-none fixed left-0 right-0 top-14 z-[35] flex justify-center px-4">
           <div
             className="max-w-xl rounded-full border border-white/[0.08] bg-[#0b0b0d]/90 px-5 py-2 text-center text-xs text-zinc-500 shadow-lg backdrop-blur-md"
@@ -963,23 +1132,36 @@ export default function WorkerDashboardPage() {
               <button
                 type="button"
                 disabled={!micInteractive}
-                onPointerDown={() => void handleRecordPressStart()}
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  void handleRecordPressStart();
+                }}
                 onPointerUp={handleRecordPressEnd}
                 onPointerLeave={handleRecordPressEnd}
                 onPointerCancel={handleRecordPressEnd}
-                className={`group inline-flex h-40 w-40 flex-col items-center justify-center gap-3 rounded-full border text-zinc-100 transition disabled:cursor-not-allowed disabled:opacity-40 ${
+                onContextMenu={(e) => e.preventDefault()}
+                className={`group inline-flex h-40 w-40 touch-none select-none flex-col items-center justify-center gap-3 rounded-full border text-zinc-100 transition disabled:cursor-not-allowed disabled:opacity-40 [-webkit-touch-callout:none] [-webkit-user-select:none] ${
                   isRecording
                     ? "border-red-300/70 bg-red-500/30 text-red-100 shadow-[0_0_60px_rgba(239,68,68,0.55)]"
                     : "border-red-500/60 bg-red-700/35 hover:scale-[1.02] hover:bg-red-700/45 shadow-[0_0_55px_rgba(220,38,38,0.45)]"
                 }`}
                 style={
                   isRecording && isRecordingPressed
-                    ? { animation: "worker-record-pulse 1.05s ease-in-out infinite" }
-                    : undefined
+                    ? {
+                        animation: "worker-record-pulse 1.05s ease-in-out infinite",
+                        WebkitTouchCallout: "none",
+                        WebkitUserSelect: "none",
+                        userSelect: "none",
+                      }
+                    : {
+                        WebkitTouchCallout: "none",
+                        WebkitUserSelect: "none",
+                        userSelect: "none",
+                      }
                 }
               >
-                <Mic className="h-12 w-12" />
-                <span className="text-center text-sm font-semibold">
+                <Mic className="pointer-events-none h-12 w-12 shrink-0 select-none" />
+                <span className="pointer-events-none select-none text-center text-sm font-semibold">
                   {currentStep === "ask_machine_name" ||
                   currentStep === "ask_issue"
                     ? isRecording
@@ -1044,7 +1226,7 @@ export default function WorkerDashboardPage() {
                       | "",
                   )
                 }
-                className="w-full rounded-xl border border-white/[0.14] bg-black/30 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-[#00D1FF]/60"
+                className="w-full rounded-xl border border-white/[0.14] bg-black/30 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-primary/60"
               >
                 <option value="">Kategorie wählen…</option>
                 <option value="maschinenfehler">Maschinenfehler</option>

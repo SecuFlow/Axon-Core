@@ -1,0 +1,17 @@
+{
+  "name": "AXON Worker",
+  "short_name": "AXON Worker",
+  "description": "Wartungsberichte direkt vom Werker. Foto + Stimme, KI strukturiert den Rest.",
+  "start_url": "/worker/dashboard",
+  "scope": "/worker/",
+  "id": "/worker/?app=axon-worker",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#030304",
+  "theme_color": "#030304",
+  "icons": [
+    { "src": "/app-icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/app-icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/app-icon-1024.png", "sizes": "1024x1024", "type": "image/png" }
+  ]
+}

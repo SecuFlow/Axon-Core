@@ -1,10 +1,14 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { normalizeDbRole } from "@/lib/adminAccess";
 import { isRealCompanyOption } from "@/lib/filterRealCompanies";
 import { requireKonzernTenantContext } from "@/lib/konzernTenantContext";
 import { resolveActorMandantId } from "@/lib/mandantScope";
 import { logEvent } from "@/lib/auditLog";
 import { PRIVATE_SWR_HEADERS } from "@/lib/httpCache";
+import {
+  loadTenantByCompanyPkMap,
+  resolveProfileMandantTenantIdFromMaps,
+} from "@/lib/profileMandateResolve.server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,6 +20,12 @@ function cleanText(v: unknown): string {
 function isEmail(v: string): boolean {
   const t = v.trim();
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(t);
+}
+
+function looksLikeEmailName(raw: string): boolean {
+  const s = raw.trim();
+  if (!s.includes("@")) return false;
+  return isEmail(s);
 }
 
 function generateTempPassword(): string {
@@ -63,12 +73,20 @@ function combinedRoleValue(roleNorm: string): "mitarbeiter" | "manager" | "admin
 
 /**
  * Team-Liste: profiles.id = Auth-UUID (kein profiles.user_id).
+ *
+ * Query `mandate_scope=1` (Konzern-Dashboard): niemals globales Auth-Listing —
+ * nur Nutzer mit derselben Mandanten-UUID wie der Betrachter.
+ * Admin HQ ohne diesen Parameter: globale Liste (Plattform-Admin).
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
   const ctx = await requireKonzernTenantContext();
   if (!ctx.ok) {
     return NextResponse.json({ error: ctx.error }, { status: ctx.status });
   }
+
+  const mandateScope =
+    new URL(request.url).searchParams.get("mandate_scope") === "1";
+  const enforceMandateFilter = mandateScope || !ctx.isAdmin;
 
   const canView =
     ctx.isAdmin || normalizeDbRole(ctx.companyRole) === "manager";
@@ -78,39 +96,42 @@ export async function GET() {
 
   const { service } = ctx;
 
+  const actorMandantId = await resolveActorMandantId(service, ctx.userId);
+  const scopeTenantId = ctx.tenantId ?? actorMandantId;
+
+  if (enforceMandateFilter && !scopeTenantId) {
+    return NextResponse.json(
+      {
+        error:
+          "Kein Mandanten-Kontext — Team-Liste nur mit Konzern-Zuweisung verfügbar.",
+        actorId: ctx.userId,
+        viewer: {
+          isAdmin: ctx.isAdmin,
+          isManagerScope: false,
+          canAssignCompany: ctx.isAdmin && !mandateScope,
+          canAssignLocation: true,
+          canChangeRole: true,
+        },
+        companyOptions: [],
+        locations: [],
+        users: [],
+      },
+      { status: 403, headers: PRIVATE_SWR_HEADERS },
+    );
+  }
+
   // ---------------------------------------------------------------------------
   // Phase 1: alle unabhängigen Reads parallel anschieben.
-  // Vorher: 6 sequenzielle awaits (~6× Round-Trip-Latenz).
-  // Jetzt: 1× Promise.all (max(latenz) statt sum(latenz)).
   // ---------------------------------------------------------------------------
   const [
-    actorMandantId,
     profRowsRes,
-    meProfileRes,
-    myCompanyRes,
     authListRes,
     compRowsRes,
     companyPickRes,
   ] = await Promise.all([
-    ctx.isAdmin ? Promise.resolve<string | null>(null) : resolveActorMandantId(service, ctx.userId),
     service
       .from("profiles")
       .select("id, role, company_id, tenant_id, mandant_id, location_id"),
-    ctx.isAdmin
-      ? Promise.resolve({ data: null, error: null })
-      : service
-          .from("profiles")
-          .select("company_id")
-          .eq("id", ctx.userId)
-          .maybeSingle(),
-    ctx.isAdmin
-      ? Promise.resolve({ data: null, error: null })
-      : service
-          .from("companies")
-          .select("id")
-          .eq("user_id", ctx.userId)
-          .limit(1)
-          .maybeSingle(),
     service.auth.admin.listUsers({ page: 1, perPage: 1000 }),
     service.from("companies").select("user_id, role, tenant_id, is_subscribed, name"),
     service
@@ -118,10 +139,6 @@ export async function GET() {
       .select("id, name, tenant_id")
       .order("name", { ascending: true }),
   ]);
-
-  if (!ctx.isAdmin && !actorMandantId) {
-    return NextResponse.json({ error: "Kein Mandanten-Kontext." }, { status: 403 });
-  }
 
   if (profRowsRes.error) {
     return NextResponse.json({ error: profRowsRes.error.message }, { status: 500 });
@@ -170,19 +187,6 @@ export async function GET() {
       location_id:
         typeof lid === "string" && lid.trim().length > 0 ? lid.trim() : null,
     });
-  }
-
-  let managerCompanyId: string | null = null;
-  if (!ctx.isAdmin) {
-    const mc = (meProfileRes.data as { company_id?: string | null } | null)?.company_id;
-    if (typeof mc === "string" && mc.length > 0) {
-      managerCompanyId = mc;
-    } else {
-      const coId = (myCompanyRes.data as { id?: string } | null)?.id;
-      if (typeof coId === "string" && coId.length > 0) {
-        managerCompanyId = coId;
-      }
-    }
   }
 
   const companyByUser = new Map<string, string>();
@@ -245,47 +249,60 @@ export async function GET() {
     }
   }
 
-  const companyPkSet = new Set<string>();
+  // Falls keine "echte" Company-Zeile (name != email) existiert, nehmen wir Branding-Name als Fallback.
+  const tenantIdsFromProfiles = new Set<string>();
   for (const [, pr] of profileById) {
-    if (pr.company_id) companyPkSet.add(pr.company_id);
+    if (pr.mandant_id) tenantIdsFromProfiles.add(pr.mandant_id);
+    if (pr.tenant_id) tenantIdsFromProfiles.add(pr.tenant_id);
+  }
+  const brandingNameByTenant = new Map<string, string>();
+  if (tenantIdsFromProfiles.size > 0) {
+    const brandingRes = await service
+      .from("branding")
+      .select("tenant_id, brand_name")
+      .in("tenant_id", [...tenantIdsFromProfiles]);
+    if (!brandingRes.error) {
+      for (const row of (brandingRes.data ?? []) as Array<{
+        tenant_id?: string | null;
+        brand_name?: string | null;
+      }>) {
+        const tid =
+          typeof row.tenant_id === "string" && row.tenant_id.trim()
+            ? row.tenant_id.trim()
+            : "";
+        const bn =
+          typeof row.brand_name === "string" && row.brand_name.trim()
+            ? row.brand_name.trim()
+            : "";
+        if (tid && bn && !brandingNameByTenant.has(tid)) {
+          brandingNameByTenant.set(tid, bn);
+        }
+      }
+    }
   }
 
-  // Phase 2: tenant-Lookup pro Company-PK + Locations parallel ziehen.
-  const [tenantsByPkRes, locsRes] = await Promise.all([
-    companyPkSet.size > 0
-      ? service
-          .from("companies")
-          .select("id, tenant_id, name")
-          .in("id", [...companyPkSet])
-      : Promise.resolve({ data: [] as Array<{ id: string; tenant_id: string | null }>, error: null }),
-    service
-      .from("locations")
-      .select("id, name, company_id")
-      .order("name", { ascending: true }),
-  ]);
-  if (tenantsByPkRes.error) {
-    return NextResponse.json({ error: tenantsByPkRes.error.message }, { status: 500 });
-  }
+  const locsRes = await service
+    .from("locations")
+    .select("id, name, company_id")
+    .order("name", { ascending: true });
   if (locsRes.error) {
     return NextResponse.json({ error: locsRes.error.message }, { status: 500 });
   }
 
-  const tenantByCompanyPk = new Map<string, string>();
+  const tenantByCompanyPk = await loadTenantByCompanyPkMap(service);
   const companyPkToName = new Map<string, string>();
-  for (const tr of tenantsByPkRes.data ?? []) {
-    const r = tr as { id?: string; tenant_id?: string | null; name?: string | null };
-    if (
-      typeof r.id === "string" &&
-      typeof r.tenant_id === "string" &&
-      r.tenant_id.length > 0
-    ) {
-      tenantByCompanyPk.set(r.id, r.tenant_id);
-    }
+  for (const c of companyOptionsFiltered) {
+    companyPkToName.set(c.id, c.name);
+  }
+  const { data: companyNamesRes } = await service
+    .from("companies")
+    .select("id, name")
+    .not("name", "is", null);
+  for (const row of companyNamesRes ?? []) {
+    const r = row as { id?: string; name?: string | null };
     if (typeof r.id === "string" && r.id.length > 0) {
       const n = typeof r.name === "string" ? r.name.trim() : "";
-      if (n) {
-        companyPkToName.set(r.id, n);
-      }
+      if (n) companyPkToName.set(r.id, n);
     }
   }
 
@@ -298,32 +315,58 @@ export async function GET() {
   }>;
 
   let locations = locRowsAll;
-  if (!ctx.isAdmin && ctx.tenantId) {
-    locations = locations.filter((l) => l.company_id === ctx.tenantId);
+  if (enforceMandateFilter && scopeTenantId) {
+    locations = locations.filter((l) => l.company_id === scopeTenantId);
+  }
+
+  /** Konzern-Dashboard: nur Profile mit exakt dieser Mandanten-UUID. */
+  const mandateAllowedUserIds = new Set<string>();
+  if (enforceMandateFilter && scopeTenantId) {
+    for (const [profileId, pr] of profileById) {
+      const recMandant = resolveProfileMandantTenantIdFromMaps(
+        {
+          company_id: pr.company_id,
+          tenant_id: pr.tenant_id,
+          mandant_id: pr.mandant_id,
+        },
+        tenantByCompanyPk,
+      );
+      if (recMandant === scopeTenantId) {
+        mandateAllowedUserIds.add(profileId);
+      }
+    }
   }
 
   const users = (listData?.users ?? [])
+    .filter((authUser) => {
+      if (!enforceMandateFilter) return true;
+      return mandateAllowedUserIds.has(authUser.id);
+    })
     .map((authUser) => {
       const userId = authUser.id;
       const row = profileById.get(userId);
 
-      if (!ctx.isAdmin) {
-        if (!row || row.company_id !== managerCompanyId) {
-          return null;
-        }
-        const recMandant =
-          row.mandant_id ?? row.tenant_id ?? null;
-        if (actorMandantId && recMandant && recMandant !== actorMandantId) {
+      if (enforceMandateFilter && scopeTenantId) {
+        if (!row) return null;
+        const recMandant = resolveProfileMandantTenantIdFromMaps(
+          {
+            company_id: row.company_id,
+            tenant_id: row.tenant_id,
+            mandant_id: row.mandant_id,
+          },
+          tenantByCompanyPk,
+        );
+        if (!recMandant || recMandant !== scopeTenantId) {
           void logEvent(
             "security.mandant_mismatch",
             "Team-Liste: Nutzer ausgefiltert (Mandanten-Mismatch).",
             {
               resource: "profiles",
               target_user_id: userId,
-              actor_mandant_id: actorMandantId,
+              actor_mandant_id: scopeTenantId,
               record_mandant_id: recMandant,
             },
-            { service, userId: ctx.userId, tenantId: actorMandantId },
+            { service, userId: ctx.userId, tenantId: scopeTenantId },
           );
           return null;
         }
@@ -361,28 +404,43 @@ export async function GET() {
 
       const profileTenantId = row?.tenant_id ?? null;
 
-      let mandateTenantId: string | null = profileTenantId;
-      if (
-        !mandateTenantId &&
-        row?.company_id &&
-        tenantByCompanyPk.has(row.company_id)
-      ) {
-        mandateTenantId = tenantByCompanyPk.get(row.company_id) ?? null;
-      }
+      const mandateTenantId = row
+        ? resolveProfileMandantTenantIdFromMaps(
+            {
+              company_id: row.company_id,
+              tenant_id: row.tenant_id,
+              mandant_id: row.mandant_id,
+            },
+            tenantByCompanyPk,
+          )
+        : null;
 
       /**
-       * Mandanten-Anzeige: zuerst Firmenname über profiles.company_id;
-       * sonst tenant_id auflösen (inkl. Legacy: tenant_id-Spalte enthielt mal companies.id).
+       * Mandanten-Anzeige: zuerst Firmenname über profiles.company_id (Admin-Zuweisung);
+       * sonst tenant_id auflösen.
        */
       let tenantAffiliation = "—";
       if (row?.company_id) {
-        tenantAffiliation =
+        const byPk =
           companyPkToName.get(row.company_id) ??
           companyIdToName.get(row.company_id) ??
-          `Konzern ${row.company_id.slice(0, 8)}…`;
-      } else if (profileTenantId) {
+          "";
+        if (byPk && !looksLikeEmailName(byPk)) {
+          tenantAffiliation = byPk;
+        }
+      }
+      if (tenantAffiliation === "—" && mandateTenantId) {
+        const bn = brandingNameByTenant.get(mandateTenantId) ?? null;
+        tenantAffiliation =
+          tenantToCompanyName.get(mandateTenantId) ??
+          (bn && !looksLikeEmailName(bn) ? bn : undefined) ??
+          companyIdToName.get(mandateTenantId) ??
+          `Mandant ${mandateTenantId.slice(0, 8)}…`;
+      } else if (tenantAffiliation === "—" && profileTenantId) {
+        const bn = brandingNameByTenant.get(profileTenantId) ?? null;
         tenantAffiliation =
           tenantToCompanyName.get(profileTenantId) ??
+          (bn && !looksLikeEmailName(bn) ? bn : undefined) ??
           companyIdToName.get(profileTenantId) ??
           `Mandant ${profileTenantId.slice(0, 8)}…`;
       }
@@ -412,12 +470,14 @@ export async function GET() {
       actorId: ctx.userId,
       viewer: {
         isAdmin: ctx.isAdmin,
-        isManagerScope: !ctx.isAdmin && ctx.tenantId != null,
-        canAssignCompany: ctx.isAdmin,
+        isManagerScope: enforceMandateFilter && scopeTenantId != null,
+        canAssignCompany: ctx.isAdmin && !mandateScope,
         canAssignLocation: true,
         canChangeRole: true,
       },
-      companyOptions: ctx.isAdmin
+      mandate_scope: mandateScope,
+      scope_tenant_id: enforceMandateFilter ? scopeTenantId : null,
+      companyOptions: ctx.isAdmin && !mandateScope
         ? companyOptionsFiltered.map(({ id, name, tenantId }) => ({
             id,
             name,

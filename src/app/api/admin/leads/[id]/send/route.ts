@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminMutationContext } from "@/app/admin/hq/_lib/requireAdminMutationContext";
 import { getGmailClient, getGmailUserEmail } from "@/lib/gmailClient.server";
+import { buildMultipartAlternativeRfc822 } from "@/lib/emailBrandFooter.server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,27 +25,6 @@ function base64UrlEncode(input: string): string {
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
     .replace(/=+$/g, "");
-}
-
-function buildRfc822Email(input: {
-  from: string;
-  to: string;
-  subject: string;
-  body: string;
-}): string {
-  const subject = input.subject.replace(/\r?\n/g, " ").trim();
-  const body = input.body.replace(/\r\n/g, "\n").replace(/\n/g, "\r\n");
-  return [
-    `From: ${input.from}`,
-    `To: ${input.to}`,
-    `Subject: ${subject}`,
-    "MIME-Version: 1.0",
-    'Content-Type: text/plain; charset="UTF-8"',
-    "Content-Transfer-Encoding: 8bit",
-    "",
-    body,
-    "",
-  ].join("\r\n");
 }
 
 export async function POST(
@@ -160,7 +140,7 @@ export async function POST(
       ? msg.subject.trim()
       : `Kontakt: ${lead.company_name}`;
 
-  const raw = buildRfc822Email({ from, to, subject, body: msg.body });
+  const raw = buildMultipartAlternativeRfc822({ from, to, subject, textBody: msg.body });
   const gmail = getGmailClient();
 
   let gmailId: string | null = null;

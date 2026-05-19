@@ -1,20 +1,17 @@
-# Alternative / Ergänzung zu Vercel Cron: ruft GET /api/cron/backup auf.
-# Nicht parallel zu Vercel-Cron aktivieren — sonst doppelte Backups pro Woche möglich.
+# Optional: manueller Aufruf von GET /api/cron/backup (z. B. wenn Vercel Cron ausfällt).
+# Geplanter Betrieb: siehe vercel.json → /api/cron/backup (Sonntag).
 #
-# Einrichtung (Repository → Settings → Secrets and variables → Actions):
-#   BACKUP_CRON_URL     z. B. https://<dein-projekt>.vercel.app/api/cron/backup
+# Kein `schedule` hier: Sonst löst GitHub wöchentlich einen Lauf aus, der ohne Secrets
+# keine Jobs ausführt — das erzeugt nutzlose „workflow run“-Mails.
+#
+# Secrets (nur nötig, wenn du diesen Workflow manuell startest):
+#   BACKUP_CRON_URL     z. B. https://<projekt>.vercel.app/api/cron/backup
 #   BACKUP_CRON_SECRET  gleicher Wert wie CRON_SECRET / AXON_CRON_SECRET in Vercel
-#
-# Ohne diese Secrets wird der Job bei jedem Trigger übersprungen (kein Fehler).
 
 name: Backup (Cron-API)
 
 on:
   workflow_dispatch:
-  schedule:
-    # Sonntag 00:00 und 01:00 UTC — deckt So 02:00 Europe/Berlin (CEST/CET) ab; ein Lauf wird serverseitig ggf. skipped.
-    - cron: "0 0 * * 0"
-    - cron: "0 1 * * 0"
 
 permissions:
   contents: read

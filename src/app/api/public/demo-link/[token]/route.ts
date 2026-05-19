@@ -6,9 +6,12 @@ import {
   generateAutomatedDemo,
   normalizeDomain,
 } from "@/lib/generateAutomatedDemo.server";
+import { detectPlatformAdminFromCookies } from "@/lib/platformAdminFromRequest.server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const DEMO_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 function cleanToken(raw: string): string {
   return String(raw ?? "").trim();
@@ -70,6 +73,21 @@ function rewriteDemoUrlForApp(demoUrl: string, app: DemoApp): string {
   }
 }
 
+function isExpiredByCreatedAt(createdAtRaw: unknown): boolean {
+  if (typeof createdAtRaw !== "string" || !createdAtRaw.trim()) return false;
+  const ts = Date.parse(createdAtRaw);
+  if (!Number.isFinite(ts)) return false;
+  return ts + DEMO_TTL_MS <= Date.now();
+}
+
+function buildExpiredCheckoutUrl(req: NextRequest, slug: string | null, app: DemoApp): URL {
+  const u = new URL("/checkout", req.url);
+  u.searchParams.set("reason", "demo_expired");
+  if (slug && slug.trim()) u.searchParams.set("demo", slug.trim());
+  u.searchParams.set("app", app);
+  return u;
+}
+
 export async function GET(
   req: NextRequest,
   context: { params: Promise<{ token: string }> },
@@ -91,7 +109,7 @@ export async function GET(
 
   const linkRes = await service
     .from("lead_demo_links")
-    .select("lead_id, opened_at")
+    .select("lead_id, opened_at, created_at, view_count")
     .eq("token", t)
     .maybeSingle();
 
@@ -102,17 +120,46 @@ export async function GET(
     return NextResponse.redirect(new URL("/demo-anfordern", req.url));
   }
 
-  // Mark opened once (best-effort)
-  if (!linkRes.data?.opened_at) {
+  const isExpired = isExpiredByCreatedAt((linkRes.data as { created_at?: unknown } | null)?.created_at);
+
+  // Admin-Bypass: Wenn der Aufruf von einem eingeloggten Plattform-Admin kommt
+  // (oder explizit per `?admin_preview=1` deklariert wird), wird der Klick NICHT
+  // als „verwendet" gezählt. So kann der Admin Demo-Links vor dem Versand
+  // prüfen, ohne die Tracking-Spalte „Angesehen" im Demo-Tab zu verfälschen.
+  const explicitAdminPreview =
+    req.nextUrl.searchParams.get("admin_preview") === "1";
+  const adminDetection = await detectPlatformAdminFromCookies();
+  const isAdminClick = explicitAdminPreview || adminDetection.isAdmin;
+
+  if (!isAdminClick) {
+    // Erstmalig: opened_at setzen (best-effort).
+    if (!linkRes.data?.opened_at) {
+      await service
+        .from("lead_demo_links")
+        .update({ opened_at: new Date().toISOString() })
+        .eq("token", t);
+    }
+    // Jeder Aufruf erhöht view_count + last_viewed_at, dokumentiert App-Variante.
+    const prevCount =
+      typeof (linkRes.data as { view_count?: unknown } | null)?.view_count === "number"
+        ? ((linkRes.data as { view_count: number }).view_count as number)
+        : 0;
     await service
       .from("lead_demo_links")
-      .update({ opened_at: new Date().toISOString() })
+      .update({
+        view_count: prevCount + 1,
+        last_viewed_at: new Date().toISOString(),
+        last_view_app: app,
+      })
       .eq("token", t);
   }
 
-  // Track in audit logs (best-effort, ohne technische Details im UI)
+  // Audit-Log: zeichnet jeden Aufruf auf (auch Admin), damit man bei Bedarf
+  // im Audit-Log nachvollziehen kann, wer wann reingeschaut hat.
   await service.from("audit_logs").insert({
-    action: "lead.demo_link_opened",
+    action: isAdminClick
+      ? "lead.demo_link_opened_by_admin"
+      : "lead.demo_link_opened",
     metadata: {
       lead_id: leadId,
       token: t,
@@ -122,34 +169,39 @@ export async function GET(
         req.headers.get("x-forwarded-for") ??
         req.headers.get("x-real-ip") ??
         null,
+      admin_preview: isAdminClick,
+      admin_user_id: adminDetection.userId,
     },
   });
 
-  // Pipeline: Klick auf Demo-Link/QR => sofort "DEMO angefordert" (Leadmaschine).
-  try {
-    await service
-      .from("leads")
-      .update({
-        stage: "demo_sent",
-        next_action_at: null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", leadId);
+  // Pipeline: Nur „echte" Demo-Klicks (kein Admin-Preview) markieren den Lead
+  // als „Demo angefordert" und stoppen die Sequenz.
+  if (!isAdminClick) {
+    try {
+      await service
+        .from("leads")
+        .update({
+          stage: "demo_sent",
+          next_action_at: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", leadId);
 
-    await service.from("lead_outreach_events").insert({
-      lead_id: leadId,
-      event_type: "demo_requested",
-      channel: "web",
-      status: "ok",
-      metadata: {
-        source: "demo_link",
-        token: t,
-        app,
-        ua: req.headers.get("user-agent") ?? null,
-      },
-    });
-  } catch {
-    // best-effort; Redirect bleibt funktional
+      await service.from("lead_outreach_events").insert({
+        lead_id: leadId,
+        event_type: "demo_requested",
+        channel: "web",
+        status: "ok",
+        metadata: {
+          source: "demo_link",
+          token: t,
+          app,
+          ua: req.headers.get("user-agent") ?? null,
+        },
+      });
+    } catch {
+      // best-effort; Redirect bleibt funktional
+    }
   }
 
   // Lead-Stammdaten für Demo-Auswahl + Formular-Prefill laden.
@@ -173,6 +225,9 @@ export async function GET(
   // 1) Domain-spezifische Demo bevorzugt (Apple-Lead -> DEMO:apple.com mit Apple-Logo).
   const domain = normalizeDomain(rawDomain);
   if (domain) {
+    if (isExpired) {
+      return NextResponse.redirect(buildExpiredCheckoutUrl(req, domain, app));
+    }
     // Schnellpfad: existiert die Demo-Firma bereits? -> Direkt-Redirect ohne Logo-Fetch.
     const existing = await service
       .from("companies")
@@ -205,10 +260,16 @@ export async function GET(
   // 2) Fallback: Default-Demo aus ENV (z.B. AXON_LEAD_DEMO_SLUG=siemens.com).
   const defaultSlug = getDefaultDemoSlugFromEnv();
   if (defaultSlug) {
+    if (isExpired) {
+      return NextResponse.redirect(buildExpiredCheckoutUrl(req, defaultSlug, app));
+    }
     return NextResponse.redirect(buildDashboardDemoUrl(req, defaultSlug, app));
   }
 
   // 3) Letzter Fallback: bisheriges Verhalten - Anfrage-Formular mit Prefill.
+  if (isExpired) {
+    return NextResponse.redirect(buildExpiredCheckoutUrl(req, null, app));
+  }
   const u = new URL("/demo-anfordern", req.url);
   if (company) u.searchParams.set("company", company);
   if (seg) u.searchParams.set("market_segment", seg);

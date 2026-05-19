@@ -70,6 +70,14 @@ function isEmail(v: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(t);
 }
 
+function locationLabel(
+  locationId: string | null,
+  locations: TeamLocationOption[],
+): string {
+  if (!locationId) return "—";
+  return locations.find((l) => l.id === locationId)?.name ?? "—";
+}
+
 function ManagerUserModal({
   variant,
   open,
@@ -726,7 +734,11 @@ export function TeamManagementClient({ variant = "dashboard" }: { variant?: Vari
     setListError(null);
     setLoading(true);
     try {
-      const r = await fetch("/api/dashboard/team", {
+      const teamPath =
+        variant === "dashboard"
+          ? "/api/dashboard/team?mandate_scope=1"
+          : "/api/dashboard/team";
+      const r = await fetch(teamPath, {
         credentials: "include",
         cache: "no-store",
       });
@@ -745,7 +757,7 @@ export function TeamManagementClient({ variant = "dashboard" }: { variant?: Vari
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [variant]);
 
   useEffect(() => {
     void load();
@@ -1004,8 +1016,15 @@ export function TeamManagementClient({ variant = "dashboard" }: { variant?: Vari
                   ) : null}
                   {!isAdmin && viewer?.canAssignLocation ? (
                     <td className={td}>
-                      {/* Manager: vereinfacht — ggf. später Inline-Standort */}
-                      <span className="opacity-70">—</span>
+                      <span
+                        className={
+                          variant === "dashboard"
+                            ? "text-slate-300"
+                            : "text-[#c8c8c8]"
+                        }
+                      >
+                        {locationLabel(u.locationId, locations)}
+                      </span>
                     </td>
                   ) : null}
                   {canManageAccounts ? (

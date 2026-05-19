@@ -90,26 +90,20 @@ export async function requireKonzernTenantContext(): Promise<KonzernTenantContex
     };
   }
 
+  // Wichtig: Ein User kann mehrere `companies`-Zeilen haben (z. B. Workforce + Konzern).
+  // `limit(1)` ist nicht deterministisch und kann zu "flapping" führen (sporadisch Admin/anderer Tenant).
+  // Daher: alle Zeilen laden und anhand von profiles.tenant_id die passende auswählen.
   const { data: rows } = await service
     .from("companies")
-    .select("role,tenant_id")
+    .select("role,tenant_id,created_at")
     .eq("user_id", user.id)
-    .limit(1);
+    .order("created_at", { ascending: true });
 
-  const row = rows?.[0] as
-    | { role?: unknown; tenant_id?: string | null }
-    | undefined;
-
-  if (row != null && normalizeDbRole(row.role) === "admin") {
-    return {
-      ok: true,
-      service,
-      userId: user.id,
-      tenantId: null,
-      isAdmin: true,
-      companyRole: "admin",
-    };
-  }
+  const companyRows = (rows ?? []) as Array<{
+    role?: unknown;
+    tenant_id?: string | null;
+    created_at?: string | null;
+  }>;
 
   const { data: profRow } = await service
     .from("profiles")
@@ -129,17 +123,49 @@ export async function requireKonzernTenantContext(): Promise<KonzernTenantContex
     typeof prof?.tenant_id === "string" && prof.tenant_id.trim().length > 0
       ? prof.tenant_id.trim()
       : null;
+  const profCompanyPk =
+    typeof prof?.company_id === "string" && prof.company_id.trim().length > 0
+      ? prof.company_id.trim()
+      : null;
   const profRoleNorm = normalizeDbRole(prof?.role);
 
+  let tenantFromCompanyPk: string | null = null;
+  if (profCompanyPk) {
+    const { data: coByPk } = await service
+      .from("companies")
+      .select("tenant_id")
+      .eq("id", profCompanyPk)
+      .maybeSingle();
+    const tid = (coByPk as { tenant_id?: string | null } | null)?.tenant_id;
+    if (typeof tid === "string" && tid.trim().length > 0) {
+      tenantFromCompanyPk = tid.trim();
+    }
+  }
+
+  const companyRowForTenant =
+    profTenantId != null
+      ? companyRows.find(
+          (r) =>
+            typeof r.tenant_id === "string" &&
+            r.tenant_id.trim().length > 0 &&
+            r.tenant_id.trim() === profTenantId,
+        ) ?? null
+      : companyRows.find(
+          (r) => typeof r.tenant_id === "string" && r.tenant_id.trim().length > 0,
+        ) ?? null;
+
   const companyTenantId =
-    row?.tenant_id && typeof row.tenant_id === "string"
-      ? row.tenant_id
+    typeof companyRowForTenant?.tenant_id === "string" &&
+    companyRowForTenant.tenant_id.trim().length > 0
+      ? companyRowForTenant.tenant_id.trim()
       : null;
 
-  /** Mandant: Profil hat Vorrang (z. B. Zuordnung zu „Axon Core HQ“). */
-  const tenantId = profTenantId ?? companyTenantId ?? null;
+  /** Mandant: Zuweisung über profiles.company_id schlägt veraltete tenant_id. */
+  const tenantId = tenantFromCompanyPk ?? profTenantId ?? companyTenantId ?? null;
 
-  let companyRole = normalizeDbRole(row?.role);
+  // `companies.role=admin` bedeutet hier Konzern-Admin im Tenant, NICHT Plattform-Admin.
+  // Plattform-Admin ist ausschließlich über JWT/Metadata oder `profilePlatformAdmin`.
+  let companyRole = normalizeDbRole(companyRowForTenant?.role);
   if (profRoleNorm === "manager") {
     companyRole = "manager";
   }

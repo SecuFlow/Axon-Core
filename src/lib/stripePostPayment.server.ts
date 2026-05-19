@@ -1,10 +1,143 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type Stripe from "stripe";
 import { getGmailClient, getGmailUserEmail } from "@/lib/gmailClient.server";
+import { appendBrandSignaturePlain, buildMultipartAlternativeRfc822 } from "@/lib/emailBrandFooter.server";
 import { logEvent } from "@/lib/auditLog";
 
 function clean(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+/**
+ * Liest aus der Demo-Firma (`DEMO:<slug>` oder über `demo_slug`-Spalte) das
+ * gepflegte Branding (Logo + Primärfarbe) und überträgt es in den
+ * `branding`-Eintrag des neu angelegten Mandanten. Ziel: Wenn ein Lead die
+ * Demo gesehen hat und kauft, soll der frisch angelegte Account direkt mit
+ * dem gewohnten Logo/Farbschema starten — kein zweites Branding-Onboarding.
+ *
+ * Best-effort: Fehlen Spalten/Tabellen, bleibt der Aufruf still ohne den
+ * Stripe-Flow zu blockieren.
+ */
+async function copyDemoBrandingIntoTenant(input: {
+  service: SupabaseClient;
+  demoSlug: string;
+  tenantId: string;
+  companyId: string | null;
+  actingUserId: string;
+}): Promise<void> {
+  const slug = clean(input.demoSlug);
+  if (!slug) return;
+
+  type DemoBrandingRow = {
+    brand_name?: string | null;
+    logo_url?: string | null;
+    primary_color?: string | null;
+  };
+
+  try {
+    // 1) Demo-Firma per `demo_slug`-Spalte (neuere Schemata) oder per Namens-
+    //    Konvention `DEMO:<slug>` finden.
+    let demoRow: DemoBrandingRow | null = null;
+
+    const bySlug = await input.service
+      .from("companies")
+      .select("brand_name, logo_url, primary_color")
+      .eq("demo_slug", slug)
+      .limit(1)
+      .maybeSingle();
+    if (!bySlug.error && bySlug.data) {
+      demoRow = bySlug.data as unknown as DemoBrandingRow;
+    } else {
+      const byName = await input.service
+        .from("companies")
+        .select("brand_name, logo_url, primary_color")
+        .eq("name", `DEMO:${slug}`)
+        .limit(1)
+        .maybeSingle();
+      if (!byName.error && byName.data) {
+        demoRow = byName.data as unknown as DemoBrandingRow;
+      }
+    }
+
+    if (!demoRow) return;
+
+    const logoUrl =
+      typeof demoRow.logo_url === "string" && demoRow.logo_url.trim()
+        ? demoRow.logo_url.trim()
+        : null;
+    const primary =
+      typeof demoRow.primary_color === "string" && demoRow.primary_color.trim()
+        ? demoRow.primary_color.trim()
+        : null;
+    const brandName =
+      typeof demoRow.brand_name === "string" && demoRow.brand_name.trim()
+        ? demoRow.brand_name.trim()
+        : null;
+
+    if (!logoUrl && !primary && !brandName) return;
+
+    // 2) Branding-Tabelle (Mandanten-scoped) befüllen — überschreibt nichts,
+    //    wenn der Kunde schon ein eigenes Branding gepflegt hat (wir setzen
+    //    nur, wenn beim Upsert nichts existiert).
+    const existing = await input.service
+      .from("branding")
+      .select("logo_url, primary_color, brand_name")
+      .eq("tenant_id", input.tenantId)
+      .maybeSingle();
+    const existingRow = (existing.data as {
+      logo_url?: string | null;
+      primary_color?: string | null;
+      brand_name?: string | null;
+    } | null) ?? null;
+
+    const patch: Record<string, unknown> = {
+      tenant_id: input.tenantId,
+      company_id: input.companyId,
+      updated_by: input.actingUserId,
+    };
+    if (logoUrl && !existingRow?.logo_url) patch.logo_url = logoUrl;
+    if (primary && !existingRow?.primary_color) patch.primary_color = primary;
+    if (brandName && !existingRow?.brand_name) patch.brand_name = brandName;
+
+    // Nur upserten, wenn wir tatsächlich etwas Neues übernehmen würden.
+    if (
+      patch.logo_url !== undefined ||
+      patch.primary_color !== undefined ||
+      patch.brand_name !== undefined
+    ) {
+      await input.service
+        .from("branding")
+        .upsert(patch, { onConflict: "tenant_id" });
+    }
+
+    // 3) Companies-Tabelle spiegeln (Legacy-Pfad), wenn die jeweilige Spalte
+    //    noch leer ist — damit ältere Lese-Pfade ebenfalls greifen.
+    if (input.companyId) {
+      const companyExisting = await input.service
+        .from("companies")
+        .select("logo_url, primary_color, brand_name")
+        .eq("id", input.companyId)
+        .maybeSingle();
+      const ce = (companyExisting.data as {
+        logo_url?: string | null;
+        primary_color?: string | null;
+        brand_name?: string | null;
+      } | null) ?? null;
+
+      const companyPatch: Record<string, unknown> = {};
+      if (logoUrl && !ce?.logo_url) companyPatch.logo_url = logoUrl;
+      if (primary && !ce?.primary_color) companyPatch.primary_color = primary;
+      if (brandName && !ce?.brand_name) companyPatch.brand_name = brandName;
+      if (Object.keys(companyPatch).length > 0) {
+        await input.service
+          .from("companies")
+          .update(companyPatch)
+          .eq("id", input.companyId);
+      }
+    }
+  } catch {
+    // Best-effort: Demo-Branding-Übernahme darf den Stripe-Flow niemals brechen.
+  }
 }
 
 function base64UrlEncode(input: string): string {
@@ -13,27 +146,6 @@ function base64UrlEncode(input: string): string {
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
     .replace(/=+$/g, "");
-}
-
-function buildRfc822Email(input: {
-  from: string;
-  to: string;
-  subject: string;
-  body: string;
-}): string {
-  const subject = input.subject.replace(/\r?\n/g, " ").trim();
-  const body = input.body.replace(/\r\n/g, "\n").replace(/\n/g, "\r\n");
-  return [
-    `From: ${input.from}`,
-    `To: ${input.to}`,
-    `Subject: ${subject}`,
-    "MIME-Version: 1.0",
-    'Content-Type: text/plain; charset="UTF-8"',
-    "Content-Transfer-Encoding: 8bit",
-    "",
-    body,
-    "",
-  ].join("\r\n");
 }
 
 async function ensureFirstMandate(input: {
@@ -88,19 +200,25 @@ async function sendWelcomeEmail(input: {
   if (!to || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) return;
   const from = getGmailUserEmail();
   const subject = "Willkommen bei AXON Core - Ihr Dashboard ist bereit";
-  const body = [
-    `Hallo ${input.companyName || "Team"},`,
-    "",
-    "Ihre Zahlung war erfolgreich. Ihr Konzern-Dashboard wird gerade eingerichtet.",
-    "",
-    `Direktlink: ${input.dashboardUrl}`,
-    "",
-    "Wenn die Seite noch vorbereitet wird, bitte kurz warten und neu laden.",
-    "",
-    "Viele Grüße",
-    "AXON Core",
-  ].join("\n");
-  const raw = buildRfc822Email({ from, to, subject, body });
+  const bodyText = appendBrandSignaturePlain(
+    [
+      `Hallo ${input.companyName || "Team"},`,
+      "",
+      "Ihre Zahlung war erfolgreich. Ihr Konzern-Dashboard wird gerade eingerichtet.",
+      "",
+      `Direktlink: ${input.dashboardUrl}`,
+      "",
+      "Wenn die Seite noch vorbereitet wird, bitte kurz warten und neu laden.",
+      "",
+      "Viele Grüße",
+    ].join("\n"),
+  );
+  const raw = buildMultipartAlternativeRfc822({
+    from,
+    to,
+    subject,
+    textBody: bodyText,
+  });
   const gmail = getGmailClient();
   await gmail.users.messages.send({
     userId: "me",
@@ -224,6 +342,42 @@ export async function runPostPaymentSetup(input: {
     userId,
     companyName,
   });
+
+  // Demo → Account: Branding (Logo, Primärfarbe, Brand-Name) aus der
+  // Demo-Firma in den frisch aktivierten Mandanten übernehmen, falls der Lead
+  // aus einem Demo-Link kam (`metadata.demo_slug` oder `metadata.demo`).
+  const demoSlugFromSession =
+    clean((session.metadata as Record<string, string | undefined> | null)?.demo_slug) ||
+    clean((session.metadata as Record<string, string | undefined> | null)?.demo);
+  if (demoSlugFromSession) {
+    await copyDemoBrandingIntoTenant({
+      service,
+      demoSlug: demoSlugFromSession,
+      tenantId,
+      companyId,
+      actingUserId: userId,
+    });
+  }
+
+  // Best-effort: Stripe IDs + Subscription Status persistieren (falls Spalten existieren).
+  try {
+    const subId = clean(session.subscription);
+    const custId = clean(session.customer);
+    const patch: Record<string, unknown> = {
+      ...(custId ? { stripe_customer_id: custId } : {}),
+      ...(subId ? { stripe_subscription_id: subId } : {}),
+      subscription_status: "active",
+      updated_at: new Date().toISOString(),
+    };
+    if (Object.keys(patch).length > 0) {
+      const upd = await service.from("companies").update(patch).eq("id", companyId);
+      if (upd.error?.message?.toLowerCase().includes("stripe_") || upd.error?.message?.toLowerCase().includes("subscription_")) {
+        // Legacy schema ohne Spalten: ignorieren.
+      }
+    }
+  } catch {
+    // ignore
+  }
 
   const dashboardUrl = `${dashboardBaseUrl.replace(/\/$/, "")}/dashboard/konzern`;
   const customerEmail = clean(session.customer_email) || clean(session.customer_details?.email);

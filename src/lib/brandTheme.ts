@@ -3,7 +3,7 @@ export const DEFAULT_BRAND_PRIMARY = "#00D1FF";
 
 export type CompanyBranding = {
   brand_name: string | null;
-  /** Immer gültige URL fürs UI (inkl. /default-logo.svg). */
+  /** Immer gültige URL fürs UI (Fallback z. B. /axoncore-logo.png). */
   logo_url: string;
   /** Aufgelöste Akzentfarbe (nie „totes“ Schwarz). */
   primary_color: string;

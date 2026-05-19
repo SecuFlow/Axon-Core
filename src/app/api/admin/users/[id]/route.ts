@@ -195,3 +195,57 @@ export async function PATCH(
 
   return NextResponse.json({ ok: true }, { headers: NO_STORE_HEADERS });
 }
+
+export async function DELETE(
+  _req: Request,
+  context: { params: Promise<{ id: string }> },
+) {
+  const ctx = await requireAdminApiSession();
+  if (ctx instanceof NextResponse) return ctx;
+
+  const { id: targetUserId } = await context.params;
+  if (!targetUserId) {
+    return NextResponse.json(
+      { error: "User-ID fehlt." },
+      { status: 400, headers: NO_STORE_HEADERS },
+    );
+  }
+
+  // Safety: Admin darf sich nicht selbst löschen (verhindert Lockout).
+  if (targetUserId === ctx.actorId) {
+    return NextResponse.json(
+      { error: "Du kannst deinen eigenen Account nicht löschen." },
+      { status: 400, headers: NO_STORE_HEADERS },
+    );
+  }
+
+  const { service } = ctx;
+
+  // Best-effort Cleanup: DB-Zeilen entfernen (falls Tabellen existieren).
+  try {
+    await service.from("profiles").delete().eq("id", targetUserId);
+  } catch {
+    // ignore
+  }
+  try {
+    await service.from("companies").delete().eq("user_id", targetUserId);
+  } catch {
+    // ignore
+  }
+  try {
+    await service.from("wallets").delete().eq("user_id", targetUserId);
+  } catch {
+    // ignore
+  }
+
+  // Auth User löschen.
+  const del = await service.auth.admin.deleteUser(targetUserId);
+  if (del.error) {
+    return NextResponse.json(
+      { error: del.error.message },
+      { status: 400, headers: NO_STORE_HEADERS },
+    );
+  }
+
+  return NextResponse.json({ ok: true }, { headers: NO_STORE_HEADERS });
+}

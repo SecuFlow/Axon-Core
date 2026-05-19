@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminMutationContext } from "@/app/admin/hq/_lib/requireAdminMutationContext";
 import { generateOutreachMessage } from "@/lib/leadOutreachCopy.server";
-import {
-  appendReplyTokenToSubject,
-  generateLeadReplyToken,
-} from "@/lib/leadReplyToken";
+import { appendLeadReplyAndBrandFooterPlain } from "@/lib/emailBrandFooter.server";
+import { formatOutreachEmailSubject, generateLeadReplyToken } from "@/lib/leadReplyToken";
 import {
   ensureLeadDemoLink,
   getPublicSiteUrlFromRequest,
@@ -185,14 +183,15 @@ export async function POST(
   }
 
   const replyToken = generateLeadReplyToken();
-  const subject = appendReplyTokenToSubject(msg.subject, replyToken);
+  const subject = formatOutreachEmailSubject(msg.subject);
   const bookingUrl = kind === "demo" && seg === "smb" ? getSmbBookingUrlFromEnv() : null;
-  const emailBody =
+  const emailBodyCore =
     kind === "demo" && seg === "enterprise" && demoLink
       ? `${msg.body}\n\nDemo‑Link: ${demoLink}`
       : kind === "demo" && seg === "smb" && bookingUrl
         ? `${msg.body}\n\nBeratungsgespräch buchen: ${bookingUrl}`
         : msg.body;
+  const emailBody = appendLeadReplyAndBrandFooterPlain(emailBodyCore, replyToken);
 
   const messageInsert = await ctx.service
     .from("lead_messages")

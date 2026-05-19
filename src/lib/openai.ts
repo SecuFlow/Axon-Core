@@ -51,9 +51,24 @@ export type AiPriorityLevel = 1 | 2 | 3;
 /** Betriebszustand aus Sprachsignalen (z. B. Abschalten, Warten, wieder Inbetriebnahme). */
 export type MachineStatus = "active" | "maintenance" | "offline";
 
+/** Liste bekannter Maschinen des Mandanten, damit GPT „S01" o.ä. matchen kann. */
+export type ExistingMachineHint = {
+  /** Maschinen-Name in der DB (wird bevorzugt zurückgegeben, wenn ein Match passt). */
+  name: string | null;
+  /** Serial in der DB (Inventar-Key). */
+  serial: string | null;
+  /** Letzter bekannter Betriebsstatus (active/maintenance/offline). */
+  status?: string | null;
+};
+
 export type WorkerAiAnalysis = {
   priority_level: AiPriorityLevel;
+  /**
+   * Mehrere Sätze: konkrete Fehlerhypothese (mit wahrscheinlichster Ursache),
+   * Risiko/Folgeschaden, Bezug zu Bild und Spracheingabe.
+   */
   analysis_text: string;
+  /** 3–7 konkrete, ausführbare Wartungsschritte in der richtigen Reihenfolge. */
   solution_steps: string[];
   /** Seriennummer, Typbezeichnung oder eindeutiger Maschinenname erkennbar. */
   machine_identifier_present: boolean;
@@ -67,6 +82,17 @@ export type WorkerAiAnalysis = {
   extracted_serial_number: string | null;
   /** Gemergter Status aus Transkript-Phrasen und Modell-Hint. */
   machine_status: MachineStatus | null;
+  /**
+   * Konkrete Ersatzteil-/Komponenten-Empfehlung als Klartext, z. B.
+   * „Vermutlich Spindellager (z. B. NSK 6205-2RS) — bitte vor Demontage Schwingungsmessung".
+   * `null`, wenn aus der Meldung kein Teil ableitbar ist.
+   */
+  required_part: string | null;
+  /**
+   * Optionale Sicherheits-/Stopp-Hinweise. Leer-Array wenn nichts kritisch ist.
+   * Beispiel: „Maschine sofort spannungsfrei schalten (Not-Aus + LOTO)".
+   */
+  safety_notes: string[];
 };
 
 export const VOICE_PROMPT_MACHINE =
@@ -125,6 +151,33 @@ export function collectInstructionUtterances(input: {
   return out;
 }
 
+/**
+ * Normalisiert beliebige Bezeichnungen zu einem stabilen Inventar-Key.
+ * „CNC Linie 3" → „cnc-linie-3", „S 01" → „s01", „Press 1A" → „press-1a".
+ *
+ * Wir nutzen das als LAST-RESORT, wenn GPT keine Seriennummer und auch kein
+ * Pattern matcht, der Werker aber eine Bezeichnung ausgesprochen hat.
+ */
+function slugifyLabelForInventory(label: string): string {
+  return label
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 120);
+}
+
+/**
+ * Findet einen Inventar-Key für die Maschine. Reihenfolge:
+ *   1) Was GPT als Seriennummer geliefert hat.
+ *   2) Pattern im Label/Transkript (z. B. „S01", „CNC-123", „Press 1A").
+ *   3) Klassischer „SN: …"-Pattern im Fließtext.
+ *   4) **Neu:** Slug des Maschinen-Labels (z. B. „CNC Linie 3" → „cnc-linie-3"),
+ *      damit das Inventar auch dann gefüllt wird, wenn keine Seriennummer
+ *      ausgesprochen wurde — nur dann wird gar nichts zurückgegeben, wenn
+ *      auch kein Label vorhanden ist.
+ */
 export function resolveSerialForInventory(input: {
   gptSerial: string | null | undefined;
   machineLabel: string | null | undefined;
@@ -134,16 +187,37 @@ export function resolveSerialForInventory(input: {
   if (fromGpt) return fromGpt.slice(0, 120);
 
   const label = input.machineLabel?.trim() ?? "";
-  const mLabel = label.match(
+
+  // 2a) Strenges Industrie-Serial-Pattern (ABC-001, CNC123, ROB-9999, A-1234).
+  const mStrict = label.match(
     /\b([A-Z]{2,8}[-_/]?\d{3,}|\d{6,}|[A-Z]-\d{4,})\b/,
   );
-  if (mLabel) return mLabel[1].slice(0, 120);
+  if (mStrict) return mStrict[1].slice(0, 120);
 
+  // 2b) Lockeres Pattern für typische Linien-/Anlagen-Bezeichnungen aus dem
+  //     Werker-Sprachgebrauch („S01", „A12", „F1", „CNC3", „Press1A").
+  //     1+ Großbuchstabe + 1+ Ziffer + optional 1 weiterer Buchstabe.
+  const mLoose = label.match(/\b([A-Z]{1,6}[-_/]?\d{1,6}[A-Z]?)\b/);
+  if (mLoose) return mLoose[1].slice(0, 120);
+
+  // 3) Klassischer „SN: …"-Pattern.
   const t = input.transcriptText;
   const mSn = t.match(
     /\b(?:SN|Seriennummer|S\/N|Nr\.?)\s*[:\-]?\s*([A-Za-z0-9][A-Za-z0-9/-]{3,})\b/i,
   );
   if (mSn) return mSn[1].slice(0, 120);
+
+  // 3b) Lockeres Pattern direkt im Transkript (Werker sagt „die S01 macht…").
+  const mLooseT = t.match(/\b([A-Z]{1,6}[-_/]?\d{1,6}[A-Z]?)\b/);
+  if (mLooseT) return mLooseT[1].slice(0, 120);
+
+  // 4) Last-Resort: Slug aus dem (ggf. mehrwortigen) Maschinen-Label, damit
+  //    auch „CNC Linie 3" / „Hydraulikpresse Halle B" als Inventar-Eintrag
+  //    landet. Mindestens 2 Zeichen, sonst ist das kein sinnvoller Key.
+  if (label) {
+    const slug = slugifyLabelForInventory(label);
+    if (slug.length >= 2) return slug;
+  }
 
   return null;
 }
@@ -161,28 +235,58 @@ type WorkerAiAnalysisParsed = Omit<WorkerAiAnalysis, "machine_status"> & {
   machine_status_hint: MachineStatus | null;
 };
 
+function buildExistingMachinesBlock(
+  hints: ExistingMachineHint[] | null | undefined,
+): string {
+  if (!Array.isArray(hints) || hints.length === 0) {
+    return "(keine bekannten Maschinen im Inventar des Mandanten)";
+  }
+  const lines = hints.slice(0, 40).map((h) => {
+    const name = (h.name ?? "").trim();
+    const serial = (h.serial ?? "").trim();
+    const status = (h.status ?? "").trim();
+    const parts: string[] = [];
+    if (name) parts.push(`name="${name}"`);
+    if (serial) parts.push(`serial="${serial}"`);
+    if (status) parts.push(`status=${status}`);
+    return `- ${parts.join(" | ") || "(unbekannt)"}`;
+  });
+  return lines.join("\n");
+}
+
 export async function analyzeWorkerInputWithGpt(input: {
   transcriptText: string;
   photoDataUrls: string[];
+  existingMachines?: ExistingMachineHint[];
 }): Promise<WorkerAiAnalysis> {
   const openai = getOpenAiClient();
   const model = process.env.OPENAI_GPT_MODEL?.trim() || "gpt-4o";
 
-  const systemPrompt =
-    "Du bist ein Assistent fuer technische Analysen in einer Fertigungsumgebung. Du bekommst ggf. ein Whisper-Transkript und ein/mehrere Fotos. " +
-    "WICHTIG: Analysiere ausschliesslich den tatsaechlichen Meldungsinhalt (Transkript und Bilder). " +
-    "Verwende KEINE Platzhalter, keinen Test- oder Demo-Modus, keine erfundenen 'Testwoerter' oder Beispieltexte — die Ausgabe muss sich direkt auf die gemeldete Stoerung beziehen. " +
-    "Erstelle eine strukturierte Antwort in strikt gueltigem JSON. " +
-    "Prioritaet ist eine Zahl von 1 bis 3 (1=hoch, 2=mittel, 3=niedrig). " +
-    "Gib eine kurze Analyse (analysis_text) und eine Liste konkreter Loesungsschritte (solution_steps) auf Deutsch. " +
-    "Pruefe: Wird eine Seriennummer ODER ein Maschinenname/Typ genannt? -> machine_identifier_present. " +
-    "Ist das Problem/Fehler klar beschrieben? -> problem_clearly_described. " +
-    "Ist der Defekt aus Sprache und Bildern nachvollziehbar? Wenn keine Fotos oder Defekt unklar -> defect_clear_from_media false. " +
-    "machine_status_hint: active (Anlage laeuft/wieder ok), maintenance (Wartung, Stillstand, warten), offline (Abschalten, Not-Aus), oder null wenn nicht erkennbar. " +
-    "extracted_machine_label: kurzer Maschinenname/Typ aus dem Text oder null. " +
-    "extracted_serial_number: nur die Seriennummer/Kennung fuer Inventar, oder null.";
+  const systemPrompt = `Du bist Senior-Wartungsingenieur mit 15 Jahren Erfahrung in Industrieanlagen (CNC, Pressen, Roboter, Förderer, Hydraulik, Pneumatik, E-Antriebe). Aufgabe: Aus einem Whisper-Transkript eines Werkers + ggf. Foto(s) erstellst du eine strikt valide JSON-Antwort mit präziser technischer Analyse.
 
-  const userText = `Eingangsdaten (kann unvollstaendig sein):
+REGELN:
+1) Analysiere AUSSCHLIESSLICH die gemeldete Störung. Keine Test-/Demo-Phrasen, keine erfundenen Beispiele, keine Platzhalter wie "XY könnte ein Problem sein".
+2) analysis_text muss 3–6 vollständige Sätze umfassen mit:
+   • der wahrscheinlichsten Ursache (technisch konkret, keine Floskeln),
+   • optional 1–2 plausiblen Alternativ-Ursachen (mit "bzw." / "oder"),
+   • Hinweis auf Folgeschäden bei Nichtbehandlung,
+   • einer Empfehlung, ob die Anlage weiterbetrieben werden darf.
+3) solution_steps enthält 3–7 konkrete, ausführbare Schritte in technisch sinnvoller Reihenfolge. Jeder Schritt fängt mit einem Verb an (z. B. "Spindel auf Lagerschaden prüfen..."). KEINE Floskeln wie "Anlage überprüfen".
+4) required_part ist DIE wahrscheinlichste Komponente bzw. ein konkreter Ersatzteil-Hinweis als deutscher Klartext, idealerweise mit Typ/Norm/Beispiel (z. B. "Spindellager NSK 6205-2RS oder vergleichbar"). Wenn aus der Meldung kein Teil ableitbar ist, gib null zurück.
+5) safety_notes listet harte Sicherheits-/Stopp-Hinweise — z. B. "Sofort Not-Aus + LOTO" bei Risiko für Mensch/Maschine. Leeres Array, wenn nichts kritisch ist.
+6) priority_level: 1=hoch (Personenrisiko, drohender Totalausfall, Brand-, Hydraulik-, E-Risiko), 2=mittel (Funktionsstörung, Folgeschaden droht), 3=niedrig (kosmetisch, planbare Wartung).
+7) machine_status_hint: 'offline' bei Not-Aus/Abschalten/Spannungsfrei, 'maintenance' bei Wartung/Stillstand/Pause, 'active' wenn die Anlage wieder normal läuft, oder null falls nicht erkennbar.
+8) MASCHINEN-MATCH: Wenn der Werker eine Bezeichnung wie "S01" / "CNC Linie 3" / "Press 1A" o.ä. ausspricht, MATCHE es zwingend gegen die unten aufgelistete bekannte Maschinenliste (case- und spaces-insensitiv). Setze dann:
+     extracted_machine_label = name aus dem Match,
+     extracted_serial_number = serial aus dem Match.
+   Falls KEIN Match existiert, aber eine eindeutige Bezeichnung im Text vorkommt: setze extracted_machine_label = die genannte Bezeichnung, und extracted_serial_number = dieselbe Bezeichnung, FALLS sie wie eine Seriennummer aussieht (Buchstabe+Zahl, z. B. "S01"). Beide Felder dürfen NICHT gleichzeitig null sein, solange irgendeine Bezeichnung im Text vorkam.`;
+
+  const existingBlock = buildExistingMachinesBlock(input.existingMachines);
+
+  const userText = `Eingangsdaten (kann unvollständig sein):
+
+Bekannte Maschinen im Inventar des Mandanten (Reihenfolge nach Häufigkeit):
+${existingBlock}
 
 Transkript:
 ${input.transcriptText || "(leer)"}
@@ -192,6 +296,8 @@ Bitte liefere strikt JSON mit den Feldern:
   "priority_level": 1 | 2 | 3,
   "analysis_text": string,
   "solution_steps": string[],
+  "required_part": string | null,
+  "safety_notes": string[],
   "machine_identifier_present": boolean,
   "problem_clearly_described": boolean,
   "defect_clear_from_media": boolean,
@@ -281,6 +387,30 @@ Bitte liefere strikt JSON mit den Feldern:
       throw new Error("Ungueltiges extracted_serial_number vom GPT Modell.");
     }
 
+    // required_part: string | null — toleranter Parser, da das Feld neu ist und
+    // ältere Prompts es noch nicht zuverlässig liefern.
+    const partRaw = (parsed as { required_part?: unknown }).required_part;
+    let required_part: string | null = null;
+    if (typeof partRaw === "string") {
+      const trimmed = partRaw.trim();
+      if (trimmed.length > 0 && trimmed.toLowerCase() !== "null") {
+        required_part = trimmed.slice(0, 500);
+      }
+    } else if (Array.isArray(partRaw)) {
+      const joined = partRaw
+        .filter((p): p is string => typeof p === "string" && p.trim().length > 0)
+        .join(", ");
+      if (joined) required_part = joined.slice(0, 500);
+    }
+
+    // safety_notes: string[]
+    const safetyRaw = (parsed as { safety_notes?: unknown }).safety_notes;
+    const safety_notes = Array.isArray(safetyRaw)
+      ? (safetyRaw.filter(
+          (s): s is string => typeof s === "string" && s.trim().length > 0,
+        ) as string[])
+      : [];
+
     const machine_status = mergeMachineStatus(
       input.transcriptText,
       hint,
@@ -290,13 +420,32 @@ Bitte liefere strikt JSON mit den Feldern:
       machine_status_hint: _drop,
       extracted_machine_label: _l,
       extracted_serial_number: _s,
+      required_part: _rp,
+      safety_notes: _sn,
       ...rest
-    } = parsed;
+    } = parsed as WorkerAiAnalysisParsed & {
+      required_part?: unknown;
+      safety_notes?: unknown;
+    };
+
+    // Label-/Serial-Fallback: Wenn GPT eines der beiden Felder ausgelassen hat,
+    // aber das andere gesetzt ist, leiten wir das fehlende ab. Damit landet
+    // „S01" in der UI nie mehr als „Unbekannte Maschine".
+    const labelFinal =
+      extracted_machine_label ?? extracted_serial_number ?? null;
+    const serialFinal =
+      extracted_serial_number ??
+      (extracted_machine_label &&
+      /^[A-Za-z]{1,6}[-_/]?\d{1,8}$/.test(extracted_machine_label.trim())
+        ? extracted_machine_label.trim()
+        : null);
 
     return {
       ...rest,
-      extracted_machine_label,
-      extracted_serial_number,
+      extracted_machine_label: labelFinal,
+      extracted_serial_number: serialFinal,
+      required_part,
+      safety_notes,
       machine_status,
     };
   } catch (error) {

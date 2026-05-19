@@ -2,14 +2,18 @@ import { NextRequest, NextResponse } from "next/server";
 import { logEvent } from "@/lib/auditLog";
 import { requireKonzernTenantContext } from "@/lib/konzernTenantContext";
 import { resolveMandantTenantId } from "@/lib/resolveMandantTenantId";
-import { applyMandantFilter, resolveActorMandantId } from "@/lib/mandantScope";
+import { resolveActorMandantId } from "@/lib/mandantScope";
+import {
+  applyAiCasesMandantScope,
+  loadCompanyPksForMandant,
+} from "@/lib/mandantCaseFilter.server";
 import { PRIVATE_SWR_HEADERS } from "@/lib/httpCache";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const coreSelect =
-  "id,created_at,analysis_text,original_priority,priority_override,machine_id,required_part,machine_status,mandant_id,machine:machines(name)";
+  "id,created_at,analysis_text,original_priority,priority_override,machine_id,machine_name,required_part,machine_status,mandant_id,machine:machines(name)";
 const syncSelect =
   "manager_public_approved,manager_public_approved_at,worker_rewarded_at,worker_public_shared_at";
 
@@ -60,6 +64,10 @@ export async function GET(request: NextRequest) {
 
   const { service } = ctx;
 
+  const companyPksForFilter = filterTenant
+    ? await loadCompanyPksForMandant(service, filterTenant)
+    : [];
+
   async function trySelect(
     includePhotoUrls: boolean,
     useCompanyOnlyFallback: boolean,
@@ -83,7 +91,7 @@ export async function GET(request: NextRequest) {
       if (useCompanyOnlyFallback) {
         q = q.eq("tenant_id", filterTenant);
       } else {
-        q = applyMandantFilter(q, filterTenant);
+        q = applyAiCasesMandantScope(q, filterTenant, companyPksForFilter);
       }
     }
 

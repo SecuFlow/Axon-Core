@@ -8,12 +8,16 @@ export function generateLeadReplyToken(): string {
   return out;
 }
 
-export function appendReplyTokenToSubject(subject: string, token: string): string {
+/** Betreff ohne technisches [AXON-…]-Suffix (Reply-Token liegt nur noch im Body). */
+export function formatOutreachEmailSubject(subject: string): string {
   const s = subject.trim();
-  const t = token.trim();
-  if (!s) return `[AXON-${t}]`;
-  if (s.includes(`[AXON-${t}]`)) return s;
-  return `${s} [AXON-${t}]`;
+  if (s) return s;
+  return "Nachricht von AXON Core";
+}
+
+/** @deprecated Token gehört nicht mehr in den Betreff — nutze formatOutreachEmailSubject + appendLeadReplyAndBrandFooterPlain */
+export function appendReplyTokenToSubject(subject: string, _token: string): string {
+  return formatOutreachEmailSubject(subject);
 }
 
 export function extractReplyTokenFromText(raw: string): string | null {

@@ -5,7 +5,7 @@ import { toClientBrandingPayload } from "@/lib/brandingDisplay";
 import { loadCompanyBranding } from "@/lib/companyBranding.server";
 import { getDefaultDemoSlug } from "@/lib/defaultDemoSlug.server";
 import { resolveDemoCompanyByParam } from "@/lib/resolveDemoCompanyByParam.server";
-import { PRIVATE_SWR_HEADERS, PUBLIC_SWR_LONG_HEADERS } from "@/lib/httpCache";
+import { NO_STORE_HEADERS, PUBLIC_SWR_LONG_HEADERS } from "@/lib/httpCache";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -106,7 +106,7 @@ export async function GET(request: Request) {
     const payload = toClientBrandingPayload({});
     return NextResponse.json(
       { ...payload, brand_name: null, name: null, show_cta: false },
-      { status: 200 },
+      { status: 200, headers: NO_STORE_HEADERS },
     );
   }
 
@@ -123,7 +123,7 @@ export async function GET(request: Request) {
     const payload = toClientBrandingPayload({});
     return NextResponse.json(
       { ...payload, brand_name: null, name: null, show_cta: false },
-      { status: 200 },
+      { status: 200, headers: NO_STORE_HEADERS },
     );
   }
 
@@ -145,6 +145,6 @@ export async function GET(request: Request) {
       name: b.brand_name,
       show_cta: false,
     },
-    { headers: PRIVATE_SWR_HEADERS },
+    { headers: NO_STORE_HEADERS },
   );
 }

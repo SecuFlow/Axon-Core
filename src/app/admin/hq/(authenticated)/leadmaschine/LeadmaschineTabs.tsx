@@ -4,8 +4,10 @@ import { useEffect, useState } from "react";
 import { LeadmaschineClient } from "./LeadmaschineClient";
 import { ApolloDiscoverySection } from "./ApolloDiscoverySection";
 import { SocialCenterSection } from "./SocialCenterSection";
+import { LeadDemosSection } from "./LeadDemosSection";
+import { VisualsStudioSection } from "./VisualsStudioSection";
 
-type TabKey = "pipeline" | "apollo" | "social";
+type TabKey = "pipeline" | "apollo" | "social" | "visuals" | "demos";
 
 type GmailHealthStatus =
   | "ok"
@@ -28,6 +30,8 @@ const TABS: Array<{ key: TabKey; label: string; hint: string }> = [
   { key: "pipeline", label: "Email-Pipeline", hint: "Tag 1 · 3 · 5" },
   { key: "apollo", label: "Apollo Discovery", hint: "Auto-Lead-Suche" },
   { key: "social", label: "KI Social Center", hint: "LinkedIn-Posts" },
+  { key: "visuals", label: "Visuals Studio", hint: "Screenshot-Posts" },
+  { key: "demos", label: "Demo-Links", hint: "Pro Lead · sofort verfügbar" },
 ];
 
 function GmailHealthBanner() {
@@ -172,6 +176,8 @@ export function LeadmaschineTabs() {
         {tab === "pipeline" ? <LeadmaschineClient /> : null}
         {tab === "apollo" ? <ApolloDiscoverySection /> : null}
         {tab === "social" ? <SocialCenterSection /> : null}
+        {tab === "visuals" ? <VisualsStudioSection /> : null}
+        {tab === "demos" ? <LeadDemosSection /> : null}
       </div>
     </div>
   );

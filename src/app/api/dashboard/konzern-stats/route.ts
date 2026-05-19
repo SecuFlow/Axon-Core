@@ -84,8 +84,10 @@ export async function GET(request: Request) {
   }
 
   // Aktive Experten: eingeloggte Mitarbeiter-App-Nutzer in den letzten 30 Tagen.
-  // Quelle: profiles mit role = 'mitarbeiter'/'worker' innerhalb Scope + Auth-User-Lookup.
-  const workerRoles = ["mitarbeiter", "worker"];
+  // Quelle: profiles mit Worker-Rolle innerhalb Scope + Auth-User-Lookup.
+  // In der DB ist die kanonische Worker-Rolle "user" (siehe parseProfileRoleToDb);
+  // "worker"/"mitarbeiter" sind Legacy-Aliase und werden weiter akzeptiert.
+  const workerRoles = ["user", "worker", "mitarbeiter"];
   const workerProfilesRes =
     scope.kind === "tenant"
       ? await ctx.service

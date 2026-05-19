@@ -12,6 +12,9 @@ type WartungCase = {
   priority_override: unknown;
   machine_id?: string | null;
   machine?: { name?: string | null } | null;
+  /** Auch ohne Inventar-Treffer (machine_id=null) trägt der Analyze-Endpoint hier
+   *  den vom Werker gesprochenen / aus dem Transkript extrahierten Namen ein. */
+  machine_name?: string | null;
   required_part: string | null;
   photo_urls?: unknown;
   machine_status?: string | null;
@@ -285,7 +288,10 @@ export default function WartungDashboardPage() {
           const override = parsePriorityOverride(c.priority_override) ?? c.original_priority;
           const level = priorityToLevel(override);
           const photos = coercePhotoUrls(c.photo_urls);
-          const machine = c.machine?.name ?? "Unbekannte Maschine";
+          const machineFromJoin = c.machine?.name?.trim() ?? "";
+          const machineFromCase = c.machine_name?.trim() ?? "";
+          const machine =
+            machineFromJoin || machineFromCase || "Unbekannte Maschine";
           const part = c.required_part ?? "—";
           const integration =
             (typeof c.machine_id === "string" && c.machine_id
@@ -309,7 +315,7 @@ export default function WartungDashboardPage() {
                   <p className="text-xs font-bold uppercase text-slate-500">
                     KI-Analyse
                   </p>
-                  <p className="mt-2 line-clamp-5 text-sm leading-relaxed text-slate-200">
+                  <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-slate-200">
                     {c.analysis_text ?? "—"}
                   </p>
                 </div>

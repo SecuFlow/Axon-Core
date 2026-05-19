@@ -24,6 +24,37 @@ body {
   font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* Auf Touch-Geräten den blauen Tap-Highlight entfernen — sonst flackert
+     jeder Button beim Tippen auf iPhone/Android. */
+  -webkit-tap-highlight-color: transparent;
+  /* iOS „rubber band“-Scroll behält den dunklen Hintergrund statt weiß zu blitzen. */
+  background-color: var(--background);
+}
+
+html,
+body {
+  /* PWA/Standalone-Mode: kein horizontaler Overflow durch verschachtelte Tabellen. */
+  overflow-x: hidden;
+}
+
+/* Tabellen-Wrapper: explizit als `.scroll-x` markierte Container scrollen sauber
+   per Finger. Buttons & Inputs in Admin-/Worker-Bereichen haben min. 44px Tap-Target. */
+.scroll-x {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 640px) {
+  button:not([data-no-touch-min]),
+  [role="button"]:not([data-no-touch-min]) {
+    min-height: 40px;
+  }
+  /* Tabellen unter 640px standardmäßig nicht horizontal aufquetschen, sondern
+     in einen scroll-Container packen. (Nur ein Hinweis — pro Tabelle muss der
+     Wrapper trotzdem `overflow-x-auto` haben; das hier ist die Safety-Net-Variante.) */
+  table {
+    max-width: 100%;
+  }
 }
 
 ::selection {

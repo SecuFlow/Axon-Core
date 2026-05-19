@@ -212,6 +212,56 @@ async function markStripeEvent(
   }
 }
 
+async function updateCompanySubscriptionState(
+  service: SupabaseClient,
+  input: {
+    userId?: string | null;
+    stripeCustomerId?: string | null;
+    stripeSubscriptionId?: string | null;
+    status?: string | null;
+    priceId?: string | null;
+    quantity?: number | null;
+    currentPeriodEnd?: number | null;
+    cancelAtPeriodEnd?: boolean | null;
+  },
+): Promise<void> {
+  const patch: Record<string, unknown> = {
+    updated_at: new Date().toISOString(),
+  };
+  if (input.stripeCustomerId) patch.stripe_customer_id = input.stripeCustomerId;
+  if (input.stripeSubscriptionId) patch.stripe_subscription_id = input.stripeSubscriptionId;
+  if (input.status) patch.subscription_status = input.status;
+  if (input.priceId) patch.stripe_price_id = input.priceId;
+  if (typeof input.quantity === "number" && Number.isFinite(input.quantity)) {
+    patch.subscription_quantity = input.quantity;
+  }
+  if (typeof input.currentPeriodEnd === "number" && Number.isFinite(input.currentPeriodEnd)) {
+    patch.current_period_end = new Date(input.currentPeriodEnd * 1000).toISOString();
+  }
+  if (typeof input.cancelAtPeriodEnd === "boolean") {
+    patch.cancel_at_period_end = input.cancelAtPeriodEnd;
+  }
+
+  // Ohne Spalten im Schema sollen wir nicht hart failen.
+  const byUser = input.userId ? await service.from("companies").update(patch).eq("user_id", input.userId) : null;
+  const byCust = !input.userId && input.stripeCustomerId
+    ? await service.from("companies").update(patch).eq("stripe_customer_id", input.stripeCustomerId)
+    : null;
+  const errMsg =
+    (byUser as { error?: { message?: string } } | null)?.error?.message ??
+    (byCust as { error?: { message?: string } } | null)?.error?.message ??
+    "";
+  if (
+    errMsg.toLowerCase().includes("stripe_") ||
+    errMsg.toLowerCase().includes("subscription_") ||
+    errMsg.toLowerCase().includes("current_period_end") ||
+    errMsg.toLowerCase().includes("cancel_at_period_end")
+  ) {
+    // ignore legacy schema
+    return;
+  }
+}
+
 /**
  * Stripe → companies.is_subscribed per Auth-UUID in user_id.
  */
@@ -282,6 +332,14 @@ export async function POST(req: Request) {
         dashboardBaseUrl: base,
         trigger: "webhook",
       });
+
+      // Best-effort: subscription/customer IDs persistieren.
+      await updateCompanySubscriptionState(supabaseService, {
+        userId: safeText(session.client_reference_id) ?? safeText(session.metadata?.supabase_user_id) ?? null,
+        stripeCustomerId: safeText(session.customer) ?? null,
+        stripeSubscriptionId: safeText(session.subscription) ?? null,
+        status: "active",
+      });
     } catch (setupError) {
       const message =
         setupError instanceof Error ? setupError.message : String(setupError);
@@ -291,6 +349,32 @@ export async function POST(req: Request) {
         { error: "Post-Payment Setup fehlgeschlagen." },
         { status: 500 },
       );
+    }
+  } else if (event.type === "customer.subscription.created" || event.type === "customer.subscription.updated" || event.type === "customer.subscription.deleted") {
+    const sub = event.data.object as Stripe.Subscription;
+    const item = sub.items?.data?.[0] ?? null;
+    const priceId = typeof item?.price?.id === "string" ? item.price.id : null;
+    const quantity = typeof item?.quantity === "number" ? item.quantity : null;
+    const anySub = sub as unknown as { current_period_end?: unknown };
+    const currentPeriodEnd =
+      typeof anySub?.current_period_end === "number" ? anySub.current_period_end : null;
+    await updateCompanySubscriptionState(supabaseService, {
+      stripeCustomerId: typeof sub.customer === "string" ? sub.customer : null,
+      stripeSubscriptionId: sub.id,
+      status: sub.status,
+      priceId,
+      quantity,
+      currentPeriodEnd,
+      cancelAtPeriodEnd: sub.cancel_at_period_end ?? null,
+    });
+  } else if (event.type === "invoice.payment_failed" || event.type === "invoice.paid") {
+    const invoice = event.data.object as Stripe.Invoice;
+    const custId = typeof invoice.customer === "string" ? invoice.customer : null;
+    if (custId) {
+      await updateCompanySubscriptionState(supabaseService, {
+        stripeCustomerId: custId,
+        status: event.type === "invoice.payment_failed" ? "past_due" : "active",
+      });
     }
   }
 

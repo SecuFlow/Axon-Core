@@ -2,6 +2,7 @@ import { randomBytes, createCipheriv, createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getGmailClient, getGmailUserEmail } from "@/lib/gmailClient.server";
+import { appendBrandSignaturePlain, buildMultipartAlternativeRfc822 } from "@/lib/emailBrandFooter.server";
 
 function sanitizeEnv(value: string | undefined): string | undefined {
   if (!value) return undefined;
@@ -79,22 +80,6 @@ function encryptDump(input: Buffer, secret: string): Buffer {
   return Buffer.concat([headerLen, header, encrypted]);
 }
 
-function buildRfc822Email(input: { from: string; to: string; subject: string; body: string }): string {
-  const subject = input.subject.replace(/\r?\n/g, " ").trim();
-  const body = input.body.replace(/\r\n/g, "\n").replace(/\n/g, "\r\n");
-  return [
-    `From: ${input.from}`,
-    `To: ${input.to}`,
-    `Subject: ${subject}`,
-    "MIME-Version: 1.0",
-    'Content-Type: text/plain; charset="UTF-8"',
-    "Content-Transfer-Encoding: 8bit",
-    "",
-    body,
-    "",
-  ].join("\r\n");
-}
-
 function base64UrlEncode(input: string): string {
   return Buffer.from(input, "utf8")
     .toString("base64")
@@ -106,12 +91,12 @@ function base64UrlEncode(input: string): string {
 async function sendSuccessMail(to: string, timestamp: string) {
   const from = getGmailUserEmail();
   const gmail = getGmailClient();
-  const body = `Backup AxonCore erfolgreich gesichert. Stand: ${timestamp}`;
-  const raw = buildRfc822Email({
+  const bodyText = appendBrandSignaturePlain(`Backup AxonCore erfolgreich gesichert. Stand: ${timestamp}`);
+  const raw = buildMultipartAlternativeRfc822({
     from,
     to,
     subject: "AxonCore Backup erfolgreich",
-    body,
+    textBody: bodyText,
   });
   await gmail.users.messages.send({
     userId: "me",

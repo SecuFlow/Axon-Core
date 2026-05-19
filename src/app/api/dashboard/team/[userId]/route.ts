@@ -57,8 +57,41 @@ async function patchProfileWithMandantSync(
   patch: Record<string, unknown>,
 ): Promise<{ error: { message: string } | null }> {
   const enriched: Record<string, unknown> = { ...patch };
+
+  const companyPk =
+    typeof enriched.company_id === "string" && enriched.company_id.trim().length > 0
+      ? enriched.company_id.trim()
+      : null;
+  if (companyPk && !("tenant_id" in enriched)) {
+    const { data: coRow } = await service
+      .from("companies")
+      .select("tenant_id, mandant_id")
+      .eq("id", companyPk)
+      .maybeSingle();
+    const tid =
+      (typeof (coRow as { mandant_id?: string | null } | null)?.mandant_id ===
+        "string" &&
+        (coRow as { mandant_id: string }).mandant_id.trim()) ||
+      (typeof (coRow as { tenant_id?: string | null } | null)?.tenant_id ===
+        "string" &&
+        (coRow as { tenant_id: string }).tenant_id.trim()) ||
+      "";
+    if (tid) {
+      enriched.tenant_id = tid;
+      enriched.mandant_id = tid;
+    }
+  }
+
   if ("tenant_id" in enriched && !("mandant_id" in enriched)) {
     enriched.mandant_id = enriched.tenant_id;
+  }
+  if (
+    "company_id" in enriched &&
+    (enriched.company_id === null || enriched.company_id === "") &&
+    !("tenant_id" in enriched)
+  ) {
+    enriched.tenant_id = null;
+    enriched.mandant_id = null;
   }
 
   let res = await service.from("profiles").update(enriched).eq("id", profileId);

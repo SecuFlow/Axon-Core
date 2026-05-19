@@ -120,9 +120,22 @@ export default async function Home() {
             </Link>
           </div>
           <p className="mt-8 max-w-2xl text-left text-lg leading-relaxed text-zinc-400 sm:text-xl sm:leading-relaxed">
-            Wir retten Fachwissen vor der Rente. KI-gestützte Dokumentation für
-            globale Konzerne.
+            AxonCore macht Produktionswissen sofort nutzbar: Mitarbeiter erfassen
+            Abläufe direkt an der Maschine, KI strukturiert es automatisch — und
+            das Management bekommt klare Insights für Standorte, Teams und
+            Prioritäten.
           </p>
+          <div className="mt-6 flex max-w-3xl flex-wrap gap-2 text-sm text-zinc-300">
+            <span className="rounded-full border border-white/[0.10] bg-white/[0.03] px-3 py-1.5">
+              Wissensdokumentation in Minuten statt Wochen
+            </span>
+            <span className="rounded-full border border-white/[0.10] bg-white/[0.03] px-3 py-1.5">
+              Standardisierte Prozesse über alle Standorte
+            </span>
+            <span className="rounded-full border border-white/[0.10] bg-white/[0.03] px-3 py-1.5">
+              Weniger Stillstand durch schnelle Antworten
+            </span>
+          </div>
           <p className="mt-8 w-full text-left text-sm text-zinc-500">
             SOC2-ready · On-Premise · 24/7 Support
           </p>
@@ -181,7 +194,7 @@ export default async function Home() {
 
             <article className="group relative rounded-2xl border border-white/[0.08] bg-gradient-to-b from-white/[0.06] to-transparent shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)] transition-all duration-300 hover:border-[#00D1FF]/25 hover:shadow-[0_0_48px_-12px_rgba(0,209,255,0.2)]">
               <Link
-                href="/register?role=private"
+                href="/coming-soon?product=axoncoins"
                 className="flex h-full flex-col p-8"
                 aria-label="Registrierung als Privatperson für Axon Coins"
               >
@@ -219,7 +232,7 @@ export default async function Home() {
             </h2>
             <div className="relative mt-10">
               <Link
-                href="/login"
+                href="/coming-soon?product=kleinunternehmer"
                 className="inline-flex h-14 items-center justify-center rounded-full border border-[#00D1FF]/50 bg-[#00D1FF] px-10 text-base font-semibold text-[#030304] shadow-[0_0_40px_-6px_rgba(0,209,255,0.5)] transition-all hover:bg-[#33ddff] hover:shadow-[0_0_56px_-4px_rgba(0,209,255,0.55)]"
               >
                 Kleinunternehmer Dashboard

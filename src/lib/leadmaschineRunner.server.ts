@@ -1,7 +1,11 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { PostgrestError } from "@supabase/supabase-js";
 import { generateOutreachMessage } from "@/lib/leadOutreachCopy.server";
-import { appendReplyTokenToSubject, generateLeadReplyToken } from "@/lib/leadReplyToken";
+import {
+  appendLeadReplyAndBrandFooterPlain,
+  buildMultipartAlternativeRfc822,
+} from "@/lib/emailBrandFooter.server";
+import { formatOutreachEmailSubject, generateLeadReplyToken } from "@/lib/leadReplyToken";
 import { ensureLeadDemoLink, getPublicSiteUrlFromEnv, getSmbBookingUrlFromEnv } from "@/lib/leadDemoLink.server";
 import { LEAD_DAILY_HARD_CAP, sequenceFollowUpDays } from "@/lib/leadmaschineTiming";
 import { buildResearchContextForPrompt, fetchLeadResearchNotes } from "@/lib/leadResearch.server";
@@ -71,27 +75,6 @@ function base64UrlEncode(input: string): string {
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
     .replace(/=+$/g, "");
-}
-
-function buildRfc822Email(input: {
-  from: string;
-  to: string;
-  subject: string;
-  body: string;
-}): string {
-  const subject = input.subject.replace(/\r?\n/g, " ").trim();
-  const body = input.body.replace(/\r\n/g, "\n").replace(/\n/g, "\r\n");
-  return [
-    `From: ${input.from}`,
-    `To: ${input.to}`,
-    `Subject: ${subject}`,
-    "MIME-Version: 1.0",
-    'Content-Type: text/plain; charset="UTF-8"',
-    "Content-Transfer-Encoding: 8bit",
-    "",
-    body,
-    "",
-  ].join("\r\n");
 }
 
 function sleep(ms: number) {
@@ -380,10 +363,16 @@ export async function runLeadmaschine(input: {
   const LEGACY_COLUMNS =
     "id, company_name, domain, industry, market_segment, employee_count, revenue_eur, hq_location, lead_segment, stage, next_action_at";
 
+  // Harte Stop-Stages: Sobald ein Lead z. B. geantwortet hat oder einen Termin
+  // gebucht hat, dürfen wir KEINE weitere Sequenz-Mail mehr senden.
+  // Reihenfolge der Chains erhält den Spaltentyp.
   let dueRes = await service
     .from("leads")
     .select(NEW_COLUMNS)
     .neq("stage", "disqualified")
+    .neq("stage", "replied")
+    .neq("stage", "booked")
+    .neq("stage", "unsubscribed")
     .order("next_action_at", { ascending: true, nullsFirst: false })
     .limit(200);
 
@@ -396,6 +385,9 @@ export async function runLeadmaschine(input: {
       .from("leads")
       .select(FALLBACK_COLUMNS)
       .neq("stage", "disqualified")
+      .neq("stage", "replied")
+      .neq("stage", "booked")
+      .neq("stage", "unsubscribed")
       .order("next_action_at", { ascending: true, nullsFirst: false })
       .limit(200);
     dueRes = fallback as unknown as typeof dueRes;
@@ -410,6 +402,9 @@ export async function runLeadmaschine(input: {
       .from("leads")
       .select(LEGACY_COLUMNS)
       .neq("stage", "disqualified")
+      .neq("stage", "replied")
+      .neq("stage", "booked")
+      .neq("stage", "unsubscribed")
       .order("next_action_at", { ascending: true, nullsFirst: false })
       .limit(200);
     dueRes = legacy as unknown as typeof dueRes;
@@ -538,12 +533,19 @@ export async function runLeadmaschine(input: {
       },
     });
 
-    // Enterprise-Demo (Mail #3): zwei Demo-Links — Konzern-Dashboard (Manager-Sicht)
+    // Demo-Links: zwei Varianten — Konzern-Dashboard (Manager-Sicht)
     // + Mitarbeiter-App (Werker-Sicht). Beide nutzen den gleichen Token, das
     // `?app`-Query unterscheidet das Redirect-Ziel im Token-Resolver.
+    //
+    // Wir erzeugen den Token JETZT schon mit der ALLERERSTEN Outreach-Mail
+    // (Enterprise: mail_1; SMB: mail_1), damit der Admin alle Demos zentral
+    // einsehen und teilen kann. In die Mail eingebettet werden die Links wie
+    // bisher erst beim Demo-Schritt (Enterprise) bzw. nie (SMB → Booking-URL).
     let demoLinkKonzern: string | null = null;
     let demoLinkWorker: string | null = null;
-    if (kind === "demo" && seg === "enterprise") {
+    const shouldEnsureDemoLinkNow =
+      kind === "mail_1" || (kind === "demo" && seg === "enterprise");
+    if (shouldEnsureDemoLinkNow) {
       try {
         const ensured = await ensureLeadDemoLink({
           service,
@@ -554,7 +556,7 @@ export async function runLeadmaschine(input: {
         const tokenUrl = base
           ? `${base}/api/public/demo-link/${encodeURIComponent(ensured.token)}`
           : ensured.url;
-        if (tokenUrl) {
+        if (tokenUrl && kind === "demo" && seg === "enterprise") {
           demoLinkKonzern = `${tokenUrl}?app=konzern`;
           demoLinkWorker = `${tokenUrl}?app=worker`;
         }
@@ -565,19 +567,20 @@ export async function runLeadmaschine(input: {
     }
 
     const replyToken = generateLeadReplyToken();
-    const subject = appendReplyTokenToSubject(msg.subject, replyToken);
+    const subject = formatOutreachEmailSubject(msg.subject);
 
     const bookingUrl = kind === "demo" && seg === "smb" ? getSmbBookingUrlFromEnv() : null;
     const demoLinksBlock =
       demoLinkKonzern && demoLinkWorker
         ? `\n\nKonzern‑Dashboard (Manager-Sicht):\n${demoLinkKonzern}\n\nMitarbeiter‑App (Werker-Sicht direkt an der Maschine):\n${demoLinkWorker}`
         : "";
-    const body =
+    const bodyCore =
       kind === "demo" && seg === "enterprise" && demoLinksBlock
         ? `${msg.body}${demoLinksBlock}`
         : kind === "demo" && seg === "smb" && bookingUrl
           ? `${msg.body}\n\nBeratungsgespräch buchen: ${bookingUrl}`
           : msg.body;
+    const body = appendLeadReplyAndBrandFooterPlain(bodyCore, replyToken);
 
     const insertMsg = await service
       .from("lead_messages")
@@ -648,11 +651,11 @@ export async function runLeadmaschine(input: {
         if (autoSentInThisRun > 0) {
           await sleep(AUTO_SEND_INTER_MAIL_DELAY_MS);
         }
-        const raw = buildRfc822Email({
+        const raw = buildMultipartAlternativeRfc822({
           from: gmailFrom,
           to: recipient,
           subject,
-          body,
+          textBody: body,
         });
         const send = await gmailClient.users.messages.send({
           userId: "me",

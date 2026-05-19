@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { readDemoSlug } from "@/lib/demoMode.client";
 
 type RegRole = "privat" | "konzern" | "kleinunternehmer" | "mitarbeiter";
 
@@ -50,6 +51,20 @@ export function RegisterContent() {
     setError(null);
     setIsLoading(true);
     try {
+      // Wenn der Nutzer aus dem Demo kam (URL-Param oder sessionStorage),
+      // hängen wir den Demo-Slug an die Registrierung — Stripe-Metadata
+      // trägt ihn dann in die Subscription, und der Webhook übernimmt
+      // beim Post-Payment-Setup das Demo-Branding (Logo + Primärfarbe).
+      const demoFromUrl = searchParams.get("demo")?.trim() ?? "";
+      const demoFromSession =
+        typeof window !== "undefined" ? (readDemoSlug() ?? "") : "";
+      const demo =
+        demoFromUrl && demoFromUrl.toLowerCase() !== "true"
+          ? demoFromUrl
+          : demoFromSession && demoFromSession.toLowerCase() !== "true"
+            ? demoFromSession
+            : "";
+
       const resp = await fetch("/api/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -58,6 +73,7 @@ export function RegisterContent() {
           role,
           email,
           password,
+          ...(demo ? { demo } : {}),
         }),
       });
       const payload: { error?: string; redirect?: string } = await resp.json();

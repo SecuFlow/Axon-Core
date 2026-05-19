@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminMutationContext } from "@/app/admin/hq/_lib/requireAdminMutationContext";
-import {
-  appendReplyTokenToSubject,
-  generateLeadReplyToken,
-} from "@/lib/leadReplyToken";
+import { appendLeadReplyAndBrandFooterPlain } from "@/lib/emailBrandFooter.server";
+import { formatOutreachEmailSubject, generateLeadReplyToken } from "@/lib/leadReplyToken";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -86,7 +84,8 @@ export async function POST(
   }
 
   const replyToken = generateLeadReplyToken();
-  const subject = appendReplyTokenToSubject(draft.subject, replyToken);
+  const subject = formatOutreachEmailSubject(draft.subject);
+  const body = appendLeadReplyAndBrandFooterPlain(draft.body, replyToken);
 
   const messageInsert = await ctx.service
     .from("lead_messages")
@@ -95,7 +94,7 @@ export async function POST(
       message_type: kind,
       reply_token: replyToken,
       subject,
-      body: draft.body,
+      body,
       metadata: { actor: ctx.actorId, source: "sekretaer_draft", draft_id: draftId },
     })
     .select("id")

@@ -47,17 +47,12 @@ export async function resolveActorMandantId(
       company_id?: unknown;
     };
 
-    const directMandant =
-      (typeof row.mandant_id === "string" && row.mandant_id.trim()) ||
-      (typeof row.tenant_id === "string" && row.tenant_id.trim()) ||
-      "";
-    if (directMandant) return directMandant;
-
     if (typeof row.company_id === "string" && row.company_id.trim()) {
       companyPkFromProfile = row.company_id.trim();
     }
   }
 
+  // Konzern-Zuweisung (profiles.company_id) hat Vorrang vor veralteter tenant_id/mandant_id.
   if (companyPkFromProfile) {
     const viaCompanyPk = await service
       .from("companies")
@@ -77,10 +72,24 @@ export async function resolveActorMandantId(
     }
   }
 
+  if (!profileRes.error && profileRes.data) {
+    const row = profileRes.data as {
+      mandant_id?: unknown;
+      tenant_id?: unknown;
+    };
+    const directMandant =
+      (typeof row.mandant_id === "string" && row.mandant_id.trim()) ||
+      (typeof row.tenant_id === "string" && row.tenant_id.trim()) ||
+      "";
+    if (directMandant) return directMandant;
+  }
+
   const companyRes = await service
     .from("companies")
-    .select("mandant_id,tenant_id")
+    .select("mandant_id,tenant_id,created_at")
     .eq("user_id", userId)
+    // deterministisch: älteste Zeile zuerst (statt zufälliges limit(1))
+    .order("created_at", { ascending: true })
     .limit(1)
     .maybeSingle();
   if (companyRes.error || !companyRes.data) return null;

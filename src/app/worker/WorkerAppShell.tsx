@@ -84,9 +84,10 @@ export function WorkerAppShell({ children }: { children: ReactNode }) {
         }}
       >
         <div className="mx-auto flex h-14 max-w-4xl items-center justify-center gap-4 px-6">
+          {/* Kein `key={logoSrc}` — Source-Wechsel reicht. `key` würde den
+              DOM-Knoten zerstören → weißes Flackern bei jedem Branding-Update. */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            key={logoSrc}
             src={logoSrc}
             alt=""
             className="h-9 w-auto max-w-[200px] object-contain"

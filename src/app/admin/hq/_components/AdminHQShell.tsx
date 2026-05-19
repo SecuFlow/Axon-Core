@@ -67,33 +67,34 @@ export function AdminHQShell({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-screen w-full flex-col bg-[#050505] text-[#a8a8a8]">
       <header className="sticky top-0 z-30 w-full bg-gradient-to-b from-[#0f0f0f] to-[#070707] backdrop-blur-sm shadow-[inset_0_-1px_0_rgba(212,175,55,0.28)]">
-        <div className="flex min-h-16 w-full flex-wrap items-center justify-between gap-3 border-b border-[#141414] px-4 py-3 md:px-8">
-          <div className="flex min-w-0 flex-1 items-center gap-4">
+        <div className="flex min-h-16 w-full flex-wrap items-center justify-between gap-2 border-b border-[#141414] px-3 py-3 sm:px-4 md:gap-3 md:px-8">
+          <div className="flex min-w-0 flex-1 items-center gap-3 md:gap-4">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={DEFAULT_LOGO_PUBLIC_PATH}
               alt="AxonCore"
-              className="h-10 w-auto max-w-[200px] shrink-0 object-contain object-left"
+              className="h-8 w-auto max-w-[140px] shrink-0 object-contain object-left sm:h-10 sm:max-w-[200px]"
               referrerPolicy="no-referrer"
             />
             <div className="hidden h-6 w-px bg-[#1f1f1f] md:block" aria-hidden />
-            <div className="truncate font-mono text-[15px] font-bold uppercase tracking-[0.28em] text-[#e4e4e4] sm:text-[17px]">
+            <div className="hidden truncate font-mono text-[15px] font-bold uppercase tracking-[0.22em] text-[#e4e4e4] sm:block sm:text-[17px] sm:tracking-[0.28em]">
               ADMIN DASHBOARD
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center justify-end gap-2 md:gap-3">
+          <div className="flex flex-shrink-0 items-center justify-end gap-2 md:gap-3">
             <Link
               href="/admin/hq/kunden-ansicht"
               scroll={false}
-              className="group flex items-center gap-2 rounded-lg border border-[#c9a962]/25 bg-[#c9a962]/[0.06] px-3 py-2 transition hover:border-[#c9a962]/45 hover:bg-[#c9a962]/10"
+              aria-label="Kunden-Ansicht"
+              className="group inline-flex min-h-[44px] items-center gap-2 rounded-lg border border-[#c9a962]/25 bg-[#c9a962]/[0.06] px-3 py-2 transition hover:border-[#c9a962]/45 hover:bg-[#c9a962]/10"
             >
               <MonitorSmartphone
                 className="size-4 shrink-0 text-[#c9a962]/90"
                 strokeWidth={1.5}
                 aria-hidden
               />
-              <span className="font-mono text-[10px] font-medium uppercase tracking-[0.16em] text-[#d4d896]">
+              <span className="hidden font-mono text-[10px] font-medium uppercase tracking-[0.16em] text-[#d4d896] sm:inline">
                 Kunden-Ansicht
               </span>
             </Link>
@@ -102,15 +103,16 @@ export function AdminHQShell({ children }: { children: ReactNode }) {
               type="button"
               onClick={() => void onLogout()}
               disabled={loggingOut}
-              className="inline-flex items-center gap-2 rounded-md border border-[#c9a962]/25 bg-[#c9a962]/[0.06] px-3 py-2 font-mono text-[10px] font-medium uppercase tracking-[0.18em] text-[#d4c896] transition hover:border-[#c9a962]/45 hover:bg-[#c9a962]/12 hover:shadow-[0_0_28px_rgba(212,175,55,0.12)] disabled:cursor-not-allowed disabled:opacity-60"
+              aria-label="Logout"
+              className="inline-flex min-h-[44px] items-center gap-2 rounded-md border border-[#c9a962]/25 bg-[#c9a962]/[0.06] px-3 py-2 font-mono text-[10px] font-medium uppercase tracking-[0.18em] text-[#d4c896] transition hover:border-[#c9a962]/45 hover:bg-[#c9a962]/12 hover:shadow-[0_0_28px_rgba(212,175,55,0.12)] disabled:cursor-not-allowed disabled:opacity-60"
             >
               <LogOut className="size-4" strokeWidth={1.5} aria-hidden />
-              Logout
+              <span className="hidden sm:inline">Logout</span>
             </button>
           </div>
         </div>
 
-        <div className="w-full px-4 py-3 md:px-8">
+        <div className="w-full px-3 py-3 sm:px-4 md:px-8">
           <LayoutGroup id="hq-header-tabs">
             <nav className="flex w-full gap-2 overflow-x-auto [-webkit-overflow-scrolling:touch] pb-0.5">
               {nav.map((t) => {
@@ -120,7 +122,7 @@ export function AdminHQShell({ children }: { children: ReactNode }) {
                     key={t.href}
                     href={t.href}
                     scroll={false}
-                    className={`relative z-0 inline-flex shrink-0 items-center gap-2 rounded-full px-4 py-2 font-mono text-[10px] font-medium uppercase tracking-[0.16em] transition-colors ${
+                    className={`relative z-0 inline-flex min-h-[40px] shrink-0 items-center gap-2 rounded-full px-3 py-2 font-mono text-[10px] font-medium uppercase tracking-[0.14em] transition-colors sm:px-4 sm:tracking-[0.16em] ${
                       active
                         ? "text-[#e8dcb8]"
                         : "border border-[#1f1f1f] bg-[#0a0a0a] text-[#8a8a8a] hover:border-[#2a2a2a] hover:text-[#d4d4d4] hover:shadow-[0_0_22px_rgba(212,175,55,0.12)]"
@@ -142,13 +144,13 @@ export function AdminHQShell({ children }: { children: ReactNode }) {
         </div>
       </header>
 
-      <main className="flex-1 w-full max-w-none px-4 py-8 md:px-8">
+      <main className="flex-1 w-full max-w-none px-3 py-6 sm:px-4 sm:py-8 md:px-8">
         <motion.div
           key={pathname}
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.22, ease: [0.25, 0.1, 0.25, 1] }}
-          className="w-full"
+          className="w-full min-w-0"
         >
           {children}
         </motion.div>

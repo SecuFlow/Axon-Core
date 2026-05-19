@@ -2,6 +2,10 @@ import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { loadCompanyBranding } from "@/lib/companyBranding.server";
+import {
+  loadTenantByCompanyPkMap,
+  resolveProfileMandantTenantId,
+} from "@/lib/profileMandateResolve.server";
 import { NO_STORE_HEADERS, PRIVATE_SWR_HEADERS } from "@/lib/httpCache";
 
 const sanitizeEnv = (value: string | undefined) => {
@@ -60,8 +64,25 @@ export async function GET() {
         must_change_password?: boolean | null;
       }
     | null;
-  const mandantId =
-    p?.mandant_id?.trim() || p?.tenant_id?.trim() || p?.company_id?.trim() || null;
+  const tenantByCompanyPk = await loadTenantByCompanyPkMap(service);
+  const mandantId = await resolveProfileMandantTenantId(
+    service,
+    {
+      company_id:
+        typeof p?.company_id === "string" && p.company_id.trim()
+          ? p.company_id.trim()
+          : null,
+      tenant_id:
+        typeof p?.tenant_id === "string" && p.tenant_id.trim()
+          ? p.tenant_id.trim()
+          : null,
+      mandant_id:
+        typeof p?.mandant_id === "string" && p.mandant_id.trim()
+          ? p.mandant_id.trim()
+          : null,
+    },
+    tenantByCompanyPk,
+  );
 
   if (!mandantId) {
     return NextResponse.json(

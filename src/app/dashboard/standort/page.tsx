@@ -80,6 +80,10 @@ function StandortPageContent() {
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
   const [saving, setSaving] = useState(false);
+  const [upgradeCheckoutPath, setUpgradeCheckoutPath] = useState<string | null>(
+    null,
+  );
+  const [upgradeLoading, setUpgradeLoading] = useState(false);
   const [deletingLocationId, setDeletingLocationId] = useState<string | null>(
     null,
   );
@@ -88,10 +92,10 @@ function StandortPageContent() {
   const [companies, setCompanies] = useState<CompanyOption[]>([]);
   const [scopeId, setScopeId] = useState("");
 
-  const isManagerProfile = profileRole === "manager";
+  const roleNorm = profileRole.trim().toLowerCase() || companyRole.trim().toLowerCase();
+  const isManagerProfile = roleNorm === "manager";
   const showMandantPicker =
     adminMode && mandantSwitcherEligible && !isManagerProfile;
-  const roleNorm = profileRole.trim().toLowerCase() || companyRole.trim().toLowerCase();
   const mayAddLocation =
     isAdminUser ||
     canManage ||
@@ -307,6 +311,7 @@ function StandortPageContent() {
     setSaving(true);
     setError(null);
     setSuccessMessage(null);
+    setUpgradeCheckoutPath(null);
     try {
       const qs =
         showMandantPicker && scopeId
@@ -329,6 +334,9 @@ function StandortPageContent() {
         error?: string;
         error_tone?: string;
         is_admin?: boolean;
+        code?: string;
+        upgrade_checkout?: string;
+        checkout?: string;
       };
       if (!resp.ok) {
         const msg = p.error ?? "Speichern fehlgeschlagen.";
@@ -341,6 +349,13 @@ function StandortPageContent() {
           setInfoHint(null);
           setError(msg);
         }
+        if (resp.status === 402 && p.code === "location_limit_reached") {
+          const u =
+            typeof p.upgrade_checkout === "string" && p.upgrade_checkout.trim()
+              ? p.upgrade_checkout.trim()
+              : null;
+          setUpgradeCheckoutPath(u);
+        }
         return;
       }
       setInfoHint(null);
@@ -350,6 +365,32 @@ function StandortPageContent() {
       await load();
     } finally {
       setSaving(false);
+    }
+  };
+
+  const startUpgrade = async () => {
+    if (!upgradeCheckoutPath || upgradeLoading) return;
+    setUpgradeLoading(true);
+    try {
+      const resp = await fetch(upgradeCheckoutPath, {
+        method: "POST",
+        credentials: "include",
+        cache: "no-store",
+      });
+      const p = (await resp.json()) as { url?: string; error?: string };
+      if (!resp.ok) {
+        setError(p.error ?? "Upgrade-Checkout konnte nicht gestartet werden.");
+        return;
+      }
+      const url =
+        typeof p.url === "string" && p.url.trim().length > 0 ? p.url.trim() : "";
+      if (!url) {
+        setError("Upgrade-Checkout konnte nicht gestartet werden.");
+        return;
+      }
+      window.location.href = url;
+    } finally {
+      setUpgradeLoading(false);
     }
   };
 
@@ -434,6 +475,18 @@ function StandortPageContent() {
       {error ? (
         <div className="mt-6 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">
           {error}
+          {upgradeCheckoutPath ? (
+            <div className="mt-3">
+              <button
+                type="button"
+                onClick={() => void startUpgrade()}
+                disabled={upgradeLoading}
+                className="rounded-full border border-primary/50 bg-primary/20 px-4 py-2 text-xs font-semibold text-white hover:bg-primary/30 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {upgradeLoading ? "Weiter zu Stripe…" : "Upgrade freischalten"}
+              </button>
+            </div>
+          ) : null}
         </div>
       ) : null}
 

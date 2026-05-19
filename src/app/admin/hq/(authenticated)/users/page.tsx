@@ -37,7 +37,7 @@ export default function AdminUsersPage() {
         <h2 className="mb-4 text-xl font-semibold text-white">
           Team-Verwaltung
         </h2>
-        <TeamManagementClient key={teamKey} variant="dashboard" />
+        <TeamManagementClient key={teamKey} variant="hq" />
       </section>
 
       <AddAdminModal

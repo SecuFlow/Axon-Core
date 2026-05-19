@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { Loader2, QrCode, X } from "lucide-react";
 import { toast } from "sonner";
+import { DEFAULT_LOGO_PUBLIC_PATH } from "@/lib/brandingDisplay";
 
 type AdminCompanyRow = {
   id: string;
@@ -220,7 +221,7 @@ export function DemoManagementCenter() {
                             >
                               {/* eslint-disable-next-line @next/next/no-img-element */}
                               <img
-                                src={c.logo_url || "/default-logo.svg"}
+                                src={c.logo_url || DEFAULT_LOGO_PUBLIC_PATH}
                                 alt=""
                                 className="size-10 object-contain p-1"
                                 referrerPolicy="no-referrer"

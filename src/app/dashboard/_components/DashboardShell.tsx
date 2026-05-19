@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { LogOut } from "lucide-react";
 import { LayoutGroup, motion } from "framer-motion";
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useDemoLinkParam } from "@/lib/useDemoLinkParam";
 import { DEFAULT_LOGO_PUBLIC_PATH } from "@/lib/brandingDisplay";
 import {
@@ -13,10 +13,7 @@ import {
   normalizePrimaryColor,
   type CompanyBranding,
 } from "@/lib/brandTheme";
-import {
-  BRANDING_UPDATED_EVENT,
-  type BrandingUpdatedDetail,
-} from "@/components/branding/useBranding";
+import { useBranding } from "@/components/branding/useBranding";
 import { DemoBanner } from "@/components/DemoBanner";
 import { DemoUpgradeCta } from "@/components/DemoUpgradeCta";
 
@@ -24,7 +21,6 @@ const navItems = [
   { href: "/dashboard", label: "Dashboard", exact: true },
   { href: "/dashboard/konzern", label: "Maschinen", exact: true },
   { href: "/dashboard/wartung", label: "Wartung", exact: true },
-  { href: "/dashboard/standort", label: "Mandat", exact: true },
   { href: "/dashboard/branding", label: "Branding", exact: true },
   { href: "/dashboard/mitarbeiter-manager", label: "Mitarbeiter & Manager", exact: true },
   { href: "/dashboard/api", label: "API", exact: true },
@@ -40,8 +36,6 @@ export function DashboardShell({
   initialBranding,
 }: Props) {
   const pathname = usePathname();
-  const sp = useSearchParams();
-  const demoFromUrl = (sp.get("demo") ?? "").trim();
   const demoForLinks = useDemoLinkParam();
 
   const withDemo = useMemo(() => {
@@ -57,102 +51,25 @@ export function DashboardShell({
       return qs ? `${pathOnly}?${qs}` : pathOnly;
     };
   }, [demoForLinks]);
-  const [brandName, setBrandName] = useState<string | null>(
-    initialBranding.brand_name,
-  );
-  const [logoUrl, setLogoUrl] = useState<string>(
-    initialBranding.logo_url || DEFAULT_LOGO_PUBLIC_PATH,
-  );
-  const [primaryHex, setPrimaryHex] = useState<string>(() => {
-    const fromDb = normalizePrimaryColor(initialBranding.primary_color ?? null);
-    return fromDb ?? DEFAULT_BRAND_PRIMARY;
-  });
 
-  useEffect(() => {
-    let cancelled = false;
-    const apply = (p: {
-      brand_name?: string | null;
-      name?: string | null;
-      logo_url?: string | null;
-      primary_color?: string | null;
-      is_admin?: boolean;
-      can_manage_branding?: boolean;
-    }) => {
-      const bn =
-        typeof p.brand_name === "string" && p.brand_name.trim()
-          ? p.brand_name.trim()
-          : typeof p.name === "string" && p.name.trim()
-            ? p.name.trim()
-            : null;
-      setBrandName(bn);
-      setLogoUrl(
-        typeof p.logo_url === "string" && p.logo_url.trim()
-          ? p.logo_url.trim()
-          : DEFAULT_LOGO_PUBLIC_PATH,
-      );
-      const pc = normalizePrimaryColor(p.primary_color ?? null);
-      setPrimaryHex(pc ?? DEFAULT_BRAND_PRIMARY);
-    };
-
-    const load = async () => {
-      try {
-        const demoQ = demoFromUrl.trim();
-        const brandingPath = demoQ
-          ? `/api/branding?demo=${encodeURIComponent(demoQ)}&t=${Date.now()}`
-          : `/api/branding?t=${Date.now()}`;
-        const resp = await fetch(brandingPath, {
-          credentials: "include",
-          cache: "no-store",
-        });
-        const p = (await resp.json()) as {
-          brand_name?: string | null;
-          name?: string | null;
-          logo_url?: string | null;
-          primary_color?: string | null;
-          is_admin?: boolean;
-          can_manage_branding?: boolean;
-        };
-        if (cancelled) return;
-        apply(p);
-      } catch {
-        if (!cancelled) {
-          setBrandName(initialBranding.brand_name);
-          setLogoUrl(initialBranding.logo_url || DEFAULT_LOGO_PUBLIC_PATH);
-          setPrimaryHex(
-            normalizePrimaryColor(initialBranding.primary_color ?? null) ??
-              DEFAULT_BRAND_PRIMARY,
-          );
-        }
-      }
-    };
-
-    void load();
-
-    const onSaved = (ev: Event) => {
-      const ce = ev as CustomEvent<BrandingUpdatedDetail>;
-      if (ce.detail?.primary_color) {
-        const pc = normalizePrimaryColor(ce.detail.primary_color);
-        setPrimaryHex(pc ?? DEFAULT_BRAND_PRIMARY);
-      }
-      if (ce.detail && "logo_url" in ce.detail) {
-        setLogoUrl(ce.detail.logo_url ?? DEFAULT_LOGO_PUBLIC_PATH);
-      }
-      window.setTimeout(() => {
-        if (!cancelled) void load();
-      }, 200);
-    };
-    window.addEventListener(BRANDING_UPDATED_EVENT, onSaved as EventListener);
-
-    return () => {
-      cancelled = true;
-      window.removeEventListener(BRANDING_UPDATED_EVENT, onSaved as EventListener);
-    };
-  }, [
-    initialBranding.brand_name,
-    initialBranding.logo_url,
-    initialBranding.primary_color,
-    demoFromUrl,
-  ]);
+  // Einzige Branding-Wahrheits-Quelle: globaler `BrandingBootstrapCore` schreibt
+  // ins sessionStorage und feuert `axon:branding`. `useBranding()` liest sofort
+  // den Cache + reagiert auf Updates → kein zweiter `/api/branding`-Fetch hier
+  // und damit kein konkurrierender Logo-Wechsel.
+  const branding = useBranding();
+  const logoUrl =
+    branding.logo_url && branding.logo_url.trim()
+      ? branding.logo_url.trim()
+      : initialBranding.logo_url || DEFAULT_LOGO_PUBLIC_PATH;
+  const primaryHex = useMemo(() => {
+    const fromLive = normalizePrimaryColor(branding.primary_color ?? null);
+    if (fromLive) return fromLive;
+    return (
+      normalizePrimaryColor(initialBranding.primary_color ?? null) ??
+      DEFAULT_BRAND_PRIMARY
+    );
+  }, [branding.primary_color, initialBranding.primary_color]);
+  const brandName = initialBranding.brand_name;
 
   const brandCss = useMemo(
     () =>
@@ -197,9 +114,11 @@ export function DashboardShell({
         <header className="sticky top-0 z-30 w-full bg-gradient-to-b from-[#0f0f0f] to-[#070707] pt-12 backdrop-blur-sm shadow-[inset_0_-1px_0_rgba(212,175,55,0.28)]">
           <div className="flex min-h-16 w-full items-center justify-between gap-4 border-b border-[#141414] px-4 py-3 md:px-8">
             <div className="flex min-w-0 items-center gap-4">
+              {/* Kein `key={logoUrl}` — Source-Wechsel reicht. Mit `key` würde der
+                  Browser den DOM-Knoten zerstören und neu mounten → sichtbares
+                  weißes Flackern. */}
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                key={logoUrl}
                 src={logoUrl || DEFAULT_LOGO_PUBLIC_PATH}
                 alt={brandName ?? "Logo"}
                 className="h-10 w-auto max-w-[200px] shrink-0 object-contain object-left"
