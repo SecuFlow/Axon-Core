@@ -132,6 +132,11 @@ export default function WartungDashboardPage() {
     searchParams.get("tenantId")?.trim() ||
     searchParams.get("company_id")?.trim() ||
     "";
+  // Demo-Modus: Wenn die URL `?demo=<slug>` trägt, müssen ALLE API-Aufrufe
+  // diesen Parameter weitergeben, damit der Server den Demo-Bypass nimmt und
+  // ausschließlich Demo-Daten liefert. Sonst würde ein eingeloggter Konzern-
+  // User in der Demo-Sicht seine ECHTEN Berichte sehen (Mandanten-Leak).
+  const demoScope = searchParams.get("demo")?.trim() ?? "";
 
   const [days, setDays] = useState<10 | 20 | 30>(10);
   const [isLoading, setIsLoading] = useState(false);
@@ -147,13 +152,19 @@ export default function WartungDashboardPage() {
     Record<string, IntegrationSummary>
   >({});
 
-  const load = async (d: number, tenant: string) => {
+  const load = async (d: number, tenant: string, demo: string) => {
     setIsLoading(true);
     setError(null);
     try {
       const qs = new URLSearchParams();
       qs.set("days", String(d));
-      if (tenant) qs.set("tenantId", tenant);
+      if (demo) {
+        // Demo zwingt den Server in den Demo-Bypass (siehe Server-Route).
+        // tenantId/company_id sind dabei irrelevant.
+        qs.set("demo", demo);
+      } else if (tenant) {
+        qs.set("tenantId", tenant);
+      }
       const resp = await fetch(`/api/wartung/cases?${qs.toString()}`, {
         method: "GET",
         credentials: "include",
@@ -171,14 +182,19 @@ export default function WartungDashboardPage() {
   };
 
   useEffect(() => {
-    void load(days, tenantScope);
-  }, [days, tenantScope]);
+    void load(days, tenantScope, demoScope);
+  }, [days, tenantScope, demoScope]);
 
   useEffect(() => {
     let cancelled = false;
     const loadMap = async () => {
       try {
-        const resp = await fetch("/api/dashboard/machines/integration-map", {
+        // Im Demo-Modus liefert der Endpoint ein leeres Mapping — entscheidend
+        // ist, dass NIEMALS Integrationen aus dem echten Mandanten geleakt werden.
+        const mapUrl = demoScope
+          ? `/api/dashboard/machines/integration-map?demo=${encodeURIComponent(demoScope)}`
+          : "/api/dashboard/machines/integration-map";
+        const resp = await fetch(mapUrl, {
           method: "GET",
           credentials: "include",
           cache: "no-store",
@@ -197,14 +213,14 @@ export default function WartungDashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [tenantScope]);
+  }, [tenantScope, demoScope]);
 
   useEffect(() => {
     const id = window.setInterval(() => {
-      void load(days, tenantScope);
+      void load(days, tenantScope, demoScope);
     }, 15000);
     return () => window.clearInterval(id);
-  }, [days, tenantScope]);
+  }, [days, tenantScope, demoScope]);
 
   const filteredCases = useMemo(() => {
     return cases.filter((c) => {
@@ -430,7 +446,7 @@ export default function WartungDashboardPage() {
                             ? "Freigabe ausstehend."
                             : "In den öffentlichen Axon-Pool geteilt.",
                       }));
-                      await load(days, tenantScope);
+                      await load(days, tenantScope, demoScope);
                     } catch {
                       setShareInfo((p) => ({
                         ...p,

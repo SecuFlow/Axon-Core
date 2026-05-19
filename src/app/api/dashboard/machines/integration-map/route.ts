@@ -25,8 +25,15 @@ type IntegrationSummary = {
  * Mapping machine_id → Integration für den Mandanten.
  * Ohne Kopplung: machine_id landet nicht im Mapping (Frontend zeigt dann KI-Fallback).
  */
-export async function GET() {
-  const ctx = await requireKonzernTenantContext();
+export async function GET(request: Request) {
+  // Schutzleitplanke: `?demo=` darf hier keine User-Daten freigeben.
+  // In der Demo gibt es ohnehin keine echten Integrationen — wir liefern
+  // einfach ein leeres Mapping.
+  const url = new URL(request.url);
+  if (url.searchParams.has("demo")) {
+    return NextResponse.json({ machines: {}, integrations: {} });
+  }
+  const ctx = await requireKonzernTenantContext(request);
   if (!ctx.ok) {
     return NextResponse.json({ error: ctx.error }, { status: ctx.status });
   }

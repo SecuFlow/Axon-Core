@@ -7,6 +7,7 @@ import {
   applyAiCasesMandantScope,
   loadCompanyPksForMandant,
 } from "@/lib/mandantCaseFilter.server";
+import { resolveDemoGuestContextFromRequest } from "@/lib/demoGuestContext.server";
 import { PRIVATE_SWR_HEADERS } from "@/lib/httpCache";
 
 export const runtime = "nodejs";
@@ -18,7 +19,25 @@ const syncSelect =
   "manager_public_approved,manager_public_approved_at,worker_rewarded_at,worker_public_shared_at";
 
 export async function GET(request: NextRequest) {
-  const ctx = await requireKonzernTenantContext();
+  // Wenn `?demo=<slug>` gesetzt ist: AUSSCHLIESSLICH Demo-Tenant-Daten liefern.
+  // Wichtig: Wir dürfen hier NICHT `requireKonzernTenantContext` aufrufen, sonst
+  // würde ein gleichzeitig eingeloggter Konzern-User seine ECHTEN Berichte in
+  // der Demo-UI sehen (Mandanten-Leak).
+  const isDemo = request.nextUrl.searchParams.has("demo");
+  const ctx = isDemo
+    ? await (async () => {
+        const demo = await resolveDemoGuestContextFromRequest(request);
+        if (!demo.ok) return demo;
+        return {
+          ok: true as const,
+          service: demo.service,
+          userId: "demo",
+          tenantId: demo.tenantId,
+          isAdmin: false,
+          companyRole: "user",
+        };
+      })()
+    : await requireKonzernTenantContext();
   if (!ctx.ok) {
     return NextResponse.json({ error: ctx.error }, { status: ctx.status });
   }
@@ -34,15 +53,29 @@ export async function GET(request: NextRequest) {
   ).trim();
 
   // Parallel: Mandanten-Resolution für Worker/Manager + ggf. Admin-Tenant-Param.
+  // Im Demo-Modus: KEINE Mandanten-Resolution — wir nutzen ausschließlich den
+  // tenantId aus dem Demo-Guest-Context. Sonst würden Admins via Demo-URL
+  // potentiell andere Mandanten sehen.
   const [actorMandantId, adminFilterTenant] = await Promise.all([
-    ctx.isAdmin ? Promise.resolve<string | null>(null) : resolveActorMandantId(ctx.service, ctx.userId),
-    ctx.isAdmin && rawTenantParam
+    isDemo || ctx.isAdmin
+      ? Promise.resolve<string | null>(null)
+      : resolveActorMandantId(ctx.service, ctx.userId),
+    !isDemo && ctx.isAdmin && rawTenantParam
       ? resolveMandantTenantId(ctx.service, rawTenantParam)
       : Promise.resolve<string | null>(null),
   ]);
 
   let filterTenant: string | null = null;
-  if (ctx.isAdmin) {
+  if (isDemo) {
+    // Demo: hart auf Demo-Tenant binden, alle anderen Eingaben ignorieren.
+    filterTenant = ctx.tenantId;
+    if (!filterTenant) {
+      return NextResponse.json(
+        { error: "Demo-Tenant konnte nicht aufgelöst werden." },
+        { status: 400 },
+      );
+    }
+  } else if (ctx.isAdmin) {
     if (rawTenantParam) {
       if (!adminFilterTenant) {
         return NextResponse.json(

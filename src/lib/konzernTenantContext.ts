@@ -25,8 +25,36 @@ export type KonzernTenantContext =
  * Konzern-APIs: eingeloggter Nutzer mit Service Role.
  * Admins (JWT, profiles.role admin oder companies.role admin): tenantId = null.
  * Sonst: Filter ueber companies.tenant_id (Manager/Nutzer).
+ *
+ * **Schutzleitplanke gegen Demo-Leak:**
+ * Wenn ein `request` mit `?demo=<slug>` übergeben wird, gibt diese Funktion
+ * SOFORT einen 400-Fehler zurück, anstatt die echten Daten des eingeloggten
+ * Users freizugeben. Endpoints, die Demo-Daten ausliefern wollen, müssen
+ * BEFORE diesen Aufruf den Demo-Bypass nehmen (siehe z. B.
+ * `/api/wartung/cases` oder `/api/wartung/machines`).
  */
-export async function requireKonzernTenantContext(): Promise<KonzernTenantContext> {
+export async function requireKonzernTenantContext(
+  request?: Request,
+): Promise<KonzernTenantContext> {
+  if (request) {
+    try {
+      const url = new URL(request.url);
+      const demoRaw = (url.searchParams.get("demo") ?? "").trim();
+      if (demoRaw.length > 0) {
+        return {
+          ok: false,
+          error:
+            "Demo-Modus an einem Endpoint ohne Demo-Bypass. " +
+            "Keine User-Daten in Demo zeigen.",
+          status: 400,
+        };
+      }
+    } catch {
+      // Falls request.url nicht parsbar ist, fahren wir konservativ fort
+      // (ohne Schutzleitplanke). Das ist nur für sehr seltene Fälle.
+    }
+  }
+
   const cookieStore = await cookies();
   const accessToken = cookieStore.get("sb-access-token")?.value;
 
